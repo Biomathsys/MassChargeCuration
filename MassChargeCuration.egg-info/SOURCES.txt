@@ -1,0 +1,8 @@
+setup.py
+MCC/__init__.py
+MCC/util.py
+MassChargeCuration.egg-info/PKG-INFO
+MassChargeCuration.egg-info/SOURCES.txt
+MassChargeCuration.egg-info/dependency_links.txt
+MassChargeCuration.egg-info/not-zip-safe
+MassChargeCuration.egg-info/top_level.txt
