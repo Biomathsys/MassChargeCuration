@@ -6,14 +6,14 @@ Requires Microsoft Research's Z3 to run. You can download it from https://github
 In order to use this module, you need to install it first, e.g. by running `pip install -e .` in the folder you downloaded this repository to.
 
 To apply it to a model, simply load your model via cobrapy and instantiate a MassChargeCuration class with your model as parameter.
-If you are unsure about your models identifier.org annotation, we also recommend to pass `update_ids = True` to the constructor. This will update any id used in the balancing effort, but will take longer (~15 minutes for 1200 Metabolites).
+If you are unsure about your models [identifiers.org](http://identifiers.org/) annotation, we also recommend to pass `update_ids = True` to the constructor. This will update any id used in the balancing effort, but will take longer (~15 minutes for 1200 Metabolites).
 ```
 from MCC import MassChargeCuration
 import cobra
 model = cobra.io.read_sbml_model(model_path)
 balancer = MassChargeCuration(model, update_ids = True)
 ```
-If you have downloaded the BioCyc database, you can pass the folder which contains it also as an argument. The balancer will also attempt to download other databases if they are not present, unless `no_local = True` is passed to it. You can pass a directory path for these databases as well via `data_path = database_path`.
+If you have downloaded the BioCyc database, you can also pass the folder which contains it as an argument. In addition to that, the balancer will attempt to download other databases if they are not present, unless `no_local = True` is passed to it. You can pass a directory path for these databases as well via `data_path = database_path`.
 ```
 balancer = MassChargeCuration(model, update_ids = True, data_path = "../database_path", biocyc_path = "../data/25.1/data")
 ```
