@@ -18,12 +18,19 @@ If you have downloaded the BioCyc database, you can also pass the folder which c
 balancer = MassChargeCuration(model, update_ids = True, data_path = "../database_path", biocyc_path = "../data/25.1/data")
 ```
 
-Once the balancer has finished you can use it the generate some reports about its results.
+Once the balancer has finished you can use it to generate some reports about its results.
 A visual comparison of the original model and the new model can be generated with `balancer.generate_visual_report()`.
 A report about unbalanced or noticable reactions can be generated with `balancer.generate_reaction_report(f"{model.id}_reactions")`.
 A report about the chosen assignments for every metabolite can be generated with balancer.generate_metabolite_report(f"{model.id}_metabolites").
 
 As an example we can look at all metabolites for which no or incomplete information was available with:
+```
+df = balancer.generate_metabolite_report(f"{model.id}_metaoblites")
+pd.set_option('display.max_rows', None) # displays entire DF, takes a while
+df[df["Inferrence Type"] != "Clean"]
+```
+
+Or at those metabolites where the assignment now differs from the original model with:
 ```
 df = balancer.generate_metabolite_report(f"{model.id}_metaoblites")
 pd.set_option('display.max_rows', None) # displays entire DF, takes a while
