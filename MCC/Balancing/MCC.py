@@ -2,7 +2,7 @@ from .satCore import SatCore
 from .formulaOptimizer import FormulaOptimizer
 from .adherenceOptimizer import AdherenceOptimizer
 from ..DataCollection.DataCollection import DataCollector
-from ..util import  adjust_proton_count, calculate_balance, formula_to_dict, get_pseudo_reactions, same_formula, score_assignment, is_cH_balanced
+from ..util import  adjust_proton_count, calculate_balance, formula_to_dict, get_pseudo_reactions, is_balanced, same_formula, is_cH_balanced
 import logging
 import time
 import pandas as pd
@@ -160,8 +160,15 @@ class MassChargeCuration:
         fig, image_ax = plt.subplots()
         fig.set_size_inches(6,6)
         size = 0.3
-        _, _, cur_total = score_assignment(self.model, report_seperate_scores = True)
-        _, _, old_total = score_assignment(self.original_model, report_seperate_scores = True)
+
+        cur_total = 0
+        for reaction in self.model.reactions:
+            if not is_balanced(reaction):
+                cur_total + 1
+        old_total = 0
+        for reaction in self.original_model.reactions:
+            if not is_balanced(reaction):
+                old_total + 1
 
         metabolite_df = self.generate_metabolite_report()
         metabolite_df["Inferrence Type"] = metabolite_df.apply(lambda row: row["Inferrence Type"] if row["Inferrence Type"] != "Unconstrained" else f"Unconstrained {'with DB' if row['Used Databases'] != '' else 'without DB'}", axis=1)
