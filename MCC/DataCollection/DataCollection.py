@@ -1,4 +1,3 @@
-import re 
 import numpy as np
 import os
 from ..util import *
@@ -10,14 +9,6 @@ from .Requests.BioCyc import BioCycInterface
 from .Requests.MetaNetX import MetaNetXInterface
 from .Requests.ModelSEED import ModelSEEDInterface
 
-replace_capital_ids = re.compile(r"([A-Z])([A-Z])(\d+)")
-replace_deuterium = re.compile(r"D([^ybs]|$)")
-replace_tritium = re.compile(r"T([^abceslhmi]|$)")
-replace_rest_R = re.compile(r"R\d*([^abefghnu]|$)")
-replace_rest_X = re.compile(r"X\d*([^e]|$)")
-replace_placeholders = re.compile(r"[*\.]\d*")
-remove_1 = re.compile(r"([A-Z][a-z]?)(1)([A-Z]|$)")
-remove_isotope_notation = re.compile(r"\[\d+([A-Z][a-z]?)\]")
 
 default_interfaces = {"metanetx.chemical" : MetaNetXInterface,
                     "bigg.metabolite" : BiGGInterface,
@@ -93,41 +84,7 @@ class DataCollector:
         """
         self.interfaces[identifier] = interface
 
-    def clean_formula(self, formula):
-        """
-        Function to clean a given formula of possible artifacts.
-        
-            - Replaces Deuterium and Tritium with Hydrogen
-
-            - Removes any 1s from atom counts
-
-            - Removes isotope notations
-
-            - Replaces any wildcard symbol with "R"
-
-        Args:
-            formula (str): Mass formula which should be cleaned.
-
-        Returns:
-            Cleaned formula.
-        """
-        # replace different hydrogen symbols
-        formula = replace_deuterium.sub("H", formula)
-        formula = replace_tritium.sub("H", formula)
-        # replace 1s
-        formula = remove_1.sub(r"\1\3", formula)
-        # remove isotope notation
-        formula = remove_isotope_notation.sub(r"\1", formula)
-        # gather rest symbols
-        if not ((found_R := replace_rest_R.search(formula)) is None):
-            formula = replace_rest_R.sub(r"\1", formula)
-        if not ((found_X := replace_rest_X.search(formula)) is None):
-            formula = replace_rest_X.sub(r"\1", formula)
-        if not ((found_other := replace_placeholders.search(formula)) is None):
-            formula = replace_placeholders.sub("", formula)
-        if any([found_R, found_X, found_other]):
-            formula += "R"
-        return formula
+    
 
     def get_formulae(self, metabolite):
         """
@@ -155,7 +112,7 @@ class DataCollector:
                                     formula = (formula[0], None)
                                 else:
                                     continue
-                            formula = (self.clean_formula(formula[0]), formula[1])
+                            formula = (clean_formula(formula[0]), formula[1])
                             cur_db = formulae.get(formula, set())
                             cur_db.add((db_id, identifier))
                             formulae[formula] = cur_db

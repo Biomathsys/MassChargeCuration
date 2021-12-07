@@ -55,8 +55,8 @@ class AdherenceOptimizer(FullBalancer):
             constraints = []
             for element in self.relevant_elements:
                 constraints.append(self.metabolite_symbols[metabolite.id][element] == original_metabolite.elements.get(element, 0))
+            self.solver.add_soft(z3.And(constraints.copy()))
             constraints.append(self.charge_symbols[metabolite.id] == original_metabolite.charge)
-            if metabolite.id == "mn2_c":
-                print(constraints)
-            self.solver.add_soft(z3.And(constraints))
+            self.solver.add_soft(z3.And(constraints), weight = 10)
+            self.solver.add_soft(self.charge_symbols[metabolite.id] == original_metabolite.charge)
 

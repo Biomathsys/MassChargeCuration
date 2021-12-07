@@ -91,6 +91,7 @@ class FullBalancer(ModelBalancer):
                 self.unknown_metabolites.add(metabolite.id)
             else:
                 constraints.append(z3.And(*[element_symbols[element] == dict_formula.get(element, 0) for element in self.relevant_elements], charge_constraint))
+
         if len(constraints) > 0:
             return z3.Or(constraints)
         else:
@@ -148,12 +149,13 @@ class FullBalancer(ModelBalancer):
                 metabolite.notes["charge inferrence"] = "unknown charge"
             else:
                 metabolite.charge = charge.as_long()
-            if (metabolite.id in self.unknown_metabolites) and (element_dict.get('H', 0) == 0 and metabolite.charge < 0) or metabolite.charge < -8: 
+            if (metabolite.id in self.unknown_metabolites) and (element_dict.get('H', 0) == 0 and metabolite.charge < 0 and self.target_model.metabolites.get_by_id(metabolite.id).charge != metabolite.charge) or metabolite.charge < -8: 
                 logging.debug(f"adjusting hydrogen count for {metabolite.id}, from {metabolite.elements.get('H', 0)} to {-metabolite.charge}")
                 if element_dict.get('H', 0) == 0: # adjust hydrogen counts and charges for unknown formulae
                     element_dict['H'] = -metabolite.charge
                     metabolite.elements = element_dict
                     metabolite.charge = 0
+
 
 
     def _get_relevant_Elements(self):

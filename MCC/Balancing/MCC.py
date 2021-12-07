@@ -2,7 +2,7 @@ from .satCore import SatCore
 from .formulaOptimizer import FormulaOptimizer
 from .adherenceOptimizer import AdherenceOptimizer
 from ..DataCollection.DataCollection import DataCollector
-from ..util import  adjust_proton_count, calculate_balance, formula_to_dict, get_pseudo_reactions, is_balanced, same_formula, is_cH_balanced
+from ..util import  adjust_proton_count, calculate_balance, formula_to_dict, get_pseudo_reactions, is_balanced, same_formula, is_cH_balanced, clean_formula
 import logging
 import time
 import pandas as pd
@@ -18,6 +18,7 @@ class MassChargeCuration:
     def __init__(self, model, data_collector = None, data_path = "../data", fixed_assignments = None, fixed_reactions = None, run_optimization = True, **kw):
         total_time = time.process_time()
         self.model = model
+        self.pseudo_reactions = get_pseudo_reactions(model)
         self.original_model = model.copy()
         self.data_collector = DataCollector(model, data_path, **kw) if data_collector is None else data_collector
         self.fixed_assignments = fixed_assignments
@@ -68,7 +69,11 @@ class MassChargeCuration:
                 matched_clean = any(same_formula(metabolite.formula, assignment[0]) for assignment in assignments)
                 if not matched_clean:
                     wildcard_metabolites.add(metabolite)
-
+            if (len(assignments) == 0):
+                original_metabolite = self.original_model.metabolites.get_by_id(metabolite.id)
+                if (not same_formula(metabolite.formula, original_metabolite.formula)) or (not metabolite.charge == original_metabolite.charge):
+                        wildcard_metabolites.add(metabolite)
+    
         # check for inferred formulae
         unchecked_metabolites = set(wildcard_metabolites)
         inferred = set()
@@ -84,7 +89,7 @@ class MassChargeCuration:
                     if count > 1:
                         unchecked_metabolites.update(wildcard_metabolites.intersection(reaction.metabolites))
                         unchecked_metabolites.discard(unchecked_metabolite)
-        
+        print(inferred) 
         # for inferred formulae we add ECO terms
         for inferred_metabolite in inferred:
             inferred_metabolite.annotation["eco"] = "ECO:0000305"
@@ -163,12 +168,14 @@ class MassChargeCuration:
 
         cur_total = 0
         for reaction in self.model.reactions:
+            if reaction.id in self.pseudo_reactions: continue
             if not is_balanced(reaction):
-                cur_total + 1
+                cur_total += 1
         old_total = 0
         for reaction in self.original_model.reactions:
+            if reaction.id in self.pseudo_reactions: continue
             if not is_balanced(reaction):
-                old_total + 1
+                old_total += 1
 
         metabolite_df = self.generate_metabolite_report()
         metabolite_df["Inferrence Type"] = metabolite_df.apply(lambda row: row["Inferrence Type"] if row["Inferrence Type"] != "Unconstrained" else f"Unconstrained {'with DB' if row['Used Databases'] != '' else 'without DB'}", axis=1)
@@ -228,9 +235,9 @@ class MassChargeCuration:
             if reaction.id in pseudo_reactions: continue
             balance = calculate_balance(reaction)
             unbalance_type = []
-            if not all(val == 0 for val in balance["mass"].values()):
+            if not all(np.isclose(val, 0) for val in balance["mass"].values()):
                 unbalance_type.append("Mass") 
-            if not (balance["charge"] == 0):
+            if not (np.isclose(balance["charge"],0)):
                 unbalance_type.append("Charge")
             if len(unbalance_type) != 0:
                 reason = self.reaction_reasons.get(reaction.id, [])
@@ -286,6 +293,14 @@ class MassChargeCuration:
                 inferrence_type = "Inferred"
             if "R" in metabolite.formula:
                 inferrence_type = "Unconstrained"
+            
+            if same_formula(clean_formula(metabolite.formula), clean_formula(other.formula)) and (metabolite.charge == other.charge):
+                if len(this_databases) > 0:
+                    target = "Target & "
+                else:
+                    target = "Target"
+            else:
+                target = ""
 
             result ={"Id" : metabolite.id,
                     "Name" : metabolite.name,
@@ -294,6 +309,7 @@ class MassChargeCuration:
                     "Previous Formula" : other.formula,
                     "Previous Charge" : other.charge,
                     "Inferrence Type" : inferrence_type,
+                    "Reasoning" : target + ', '.join(this_databases),
                     "Used Databases" : ', '.join(this_databases),
                     "Previous Databases" : ', '.join(other_databases)
             }
@@ -311,10 +327,47 @@ class MassChargeCuration:
                 })
 
             return result
-        information = []
+        information = {}
         for metabolite in self.model.metabolites:
-            information.append(generate_metabolite_information(metabolite))
-        information_df = pd.DataFrame(information)
+            information[metabolite.id] = generate_metabolite_information(metabolite)
+
+        
+        fixing_reactions = set()
+        for reaction in self.model.reactions:
+            if reaction.id in self.pseudo_reactions: continue
+            unknown_count = 0
+            for metabolite in reaction.metabolites:
+                if information[metabolite.id]["Reasoning"] == "":
+                    unknown_count += 1
+            if unknown_count == 1:
+                fixing_reactions.add(reaction)
+        while len(fixing_reactions) > 0:
+            fixing_reaction = fixing_reactions.pop()
+            reasons = []
+            fixed_metabolite = None
+            for metabolite in fixing_reaction.metabolites:
+                reason = information[metabolite.id]["Reasoning"]
+                if reason == "": fixed_metabolite = metabolite
+                else:
+                    reasons.append(f"{metabolite.id} -> {reason}")
+            if fixed_metabolite is not None: #otherwise we already fixed it
+                reason = f"{fixing_reaction.id}: {'(' if len(reasons) > 1 else ''}{'; '.join(reasons)}{')' if len(reasons) > 1 else ''}"
+                information[fixed_metabolite.id]["Reasoning"] = reason
+                for reaction in fixed_metabolite.reactions:
+                    if reaction.id in self.pseudo_reactions: continue
+                    unknown_count = 0
+                    for metabolite in reaction.metabolites:
+                        if information[metabolite.id] == "": unknown_count += 1
+                    if unknown_count == 1:
+                        fixing_reactions.add(reaction)
+        
+        for metabolite_id, info in information.items():
+            if not info["Reasoning"].startswith("Target"):
+                if same_formula(info["Determined Formula"], info["Previous Formula"], ignore_rest = True):
+                    info["Reasoning"] = f"unconstrained Target{' & ' if info['Reasoning'] != '' else ''}{info['Reasoning']}"
+
+
+        information_df = pd.DataFrame(list(information.values()))
         def similarity(row, columns):
             base = columns[0]
             target = columns[1]
@@ -333,7 +386,7 @@ class MassChargeCuration:
         if not (target_model is None):
                 information_df["Target Similarity"] = information_df.apply(similarity, columns = (("Determined Formula", "Determined Charge"), ("Target Formula", "Target Charge")), axis = 1)
                 information_df["Target Change"] = information_df.apply(similarity, columns = (("Previous Formula", "Previous Charge"), ("Target Formula", "Target Charge")), axis = 1)
-                information_df = information_df[["Id", "Name", "Determined Formula", "Determined Charge", "Target Formula", "Target Charge", "Used Databases", "Target Databases", "Target Similarity", "Inferrence Type", "Target Change", "Previous Formula", "Previous Charge", "Previous Databases", "Similarity"]]
+                information_df = information_df[["Id", "Name", "Determined Formula", "Determined Charge", "Target Formula", "Target Charge", "Reasoning", "Target Databases", "Target Similarity", "Inferrence Type", "Target Change", "Previous Formula", "Previous Charge", "Previous Databases", "Similarity"]]
         def type_order_func(series):
             order = {"Inferred": 0, "Unconstrained": 3, "Clean": 6}[series["Inferrence Type"]]
             order = order if series["Determined Formula"] == series["Previous Formula"] else order + 1.5
@@ -341,7 +394,7 @@ class MassChargeCuration:
             return order
         #sort frame by most interesting information
         information_df["type_order"] = information_df.apply(type_order_func, axis = 1)
-        information_df["num_db"] = information_df["Used Databases"].apply(lambda x: len(x.split(", ")))
+        information_df["num_db"] = information_df["Reasoning"].apply(lambda x: len(x.split(", ")))
         information_df = information_df.sort_values(["type_order", "num_db"]).reset_index(drop=True)
         information_df = information_df.drop(columns = ["type_order", "num_db"])
         if not filename is None: information_df.to_csv(f"{filename}.csv")

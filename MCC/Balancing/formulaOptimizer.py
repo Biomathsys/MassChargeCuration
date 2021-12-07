@@ -1,9 +1,10 @@
 from .fullBalancer import FullBalancer
 import logging
 import z3
-from ..util import formula_to_dict, is_cH_balanced, same_formula
+from ..util import formula_to_dict, is_cH_balanced, same_formula, clean_formula
 import re
 
+remove_H = re.compile(r"H\d*([^gfe]|$)") # remember to not also remove H from Hg
 remove_H = re.compile(r"H\d*([^gfe]|$)") # remember to not also remove H from Hg
 
 class FormulaOptimizer(FullBalancer):
@@ -39,7 +40,8 @@ class FormulaOptimizer(FullBalancer):
         """
         self.relevant_elements = self.balancer.relevant_elements
         self.unbalancable_reactions = self.balancer.unbalancable_reactions.copy()
-        for reaction in self.model.reactions:
+        self.unknown_metabolites = self.balancer.unknown_metabolites.copy()
+        for reaction in self.balancer.model.reactions:
             if not is_cH_balanced(reaction):
                 self.unbalancable_reactions.add(reaction.id)
         self._generate_metabolite_assertions()
@@ -68,7 +70,9 @@ class FormulaOptimizer(FullBalancer):
         self.metabolite_symbols[metabolite.id] = element_symbols
 
         original_metabolite = self.target_model.metabolites.get_by_id(metabolite.id)
-        if same_formula(metabolite.formula, original_metabolite.formula) and metabolite.charge == original_metabolite.charge:
+        if metabolite.id in ["trnaglu_c", "glutrna_c"]:
+            print(f"{metabolite.id}: original: {original_metabolite.formula}, {original_metabolite.charge}, adhered: {metabolite.formula, metabolite.charge}")
+        if same_formula(metabolite.formula, clean_formula(original_metabolite.formula), ignore_rest = True) and metabolite.charge == original_metabolite.charge:
             charge_constraint = self.charge_symbols[metabolite.id] == metabolite.charge
             constraints.append(z3.And(*[element_symbols[element] == metabolite.elements.get(element, 0) for element in self.relevant_elements], charge_constraint))
         else:
@@ -98,12 +102,12 @@ class FormulaOptimizer(FullBalancer):
 
             1. adhering to an unconstrained database representation
 
-            2. lowest atom count possible
+            2. no unnecessary atoms
 
         """
         for metabolite in self.model.metabolites:
             # if there is no constraint on a metabolite formula, we want it to become 0
-            if metabolite in self.incomplete_formulae:
+            if metabolite in self.unknown_metabolites:
                 for element in self.relevant_elements:
                     self.solver.add_soft(self.metabolite_symbols[metabolite.id][element] == 0)
 
@@ -119,10 +123,10 @@ class FormulaOptimizer(FullBalancer):
                         constraints.append(self.metabolite_symbols[metabolite.id][element] == length_sorted_formulae[i][0].get(element, 0))
                     if not (length_sorted_formulae[i][1] is None):
                         constraints.append(self.charge_symbols[metabolite.id] == length_sorted_formulae[i][1])
-                    self.solver.add_soft(z3.And(constraints), weight = i + 1)
-
+                    self.solver.add_soft(z3.And(constraints), weight = 10 * (i + 1))
+            """
                 # if the formula is unconstrained, we prefer to choose a partial representation from a database
-                if metabolite in self.incomplete_formulae:
+                if metabolite in self.unknown_metabolites:
                     for i in range(len(length_sorted_formulae)):
                         element_constraints = []
                         for element in length_sorted_formulae[i][0]:
@@ -130,6 +134,8 @@ class FormulaOptimizer(FullBalancer):
                             element_constraints.append(self.metabolite_symbols[metabolite.id][element] == length_sorted_formulae[i][0].get(element, 0))
                         if not (length_sorted_formulae[i][1] is None):
                             element_constraints.append(self.charge_symbols[metabolite.id] == length_sorted_formulae[i][1])
+                        if metabolite.id in ["asntrna_c"]:
+                            print(element_constraints)
                         # weight * 10 so we try to adhere to database formulae rather than having no elements
                         self.solver.add_soft(z3.And(element_constraints), weight = 10 * (i + 1))
-            
+            """

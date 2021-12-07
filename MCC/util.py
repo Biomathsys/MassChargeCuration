@@ -2,6 +2,7 @@ import cobra
 import logging
 import sys
 import numpy as np
+import re
 import z3
 
 logging_is_setup = False
@@ -135,7 +136,7 @@ def is_cH_balanced(reaction, assignments = None, unknown_is_balanced = False):
 
 def get_pseudo_reactions(model):
     """
-    Gives all pseudo reaction for a given model.
+    Gives all pseudo reactions ids for a given model.
 
     Args:
         model (cobrapy.Model): Model for which to determine the pseudoreactions.
@@ -232,11 +233,11 @@ def calculate_balance(reaction, assignments = None):
     mass_dict = {}
     for metabolite, coeff in reaction.metabolites.items():
         if assignments:
-            mass = formula_to_dict(assignments[metabolite.id][0])
-            charge = assignments[metabolite.id][1]
+            mass = formula_to_dict(assignments[metabolite.id][0]) or {}
+            charge = assignments[metabolite.id][1] or 1
         else:
-            mass = metabolite.elements
-            charge = metabolite.charge
+            mass = metabolite.elements or {}
+            charge = metabolite.charge or 0
         charge_balance += charge * coeff
         for atom, count in mass.items():
             mass_dict[atom] = mass_dict.get(atom, 0) + (count * coeff)
@@ -254,9 +255,9 @@ def is_balanced(reaction, assignments = None, unknown_is_balanced = False):
         TODO: unkown is balanced makes currently no sense
     """
     if unknown_is_balanced:
-        raise NotImplementedError
+        pass #raise NotImplementedError
     balance = calculate_balance(reaction, assignments)
-    return all(np.isclose(val, 0) for val in balance["mass"].values()) and (balance["charge"] == 0)
+    return all(np.isclose(val, 0) for val in balance["mass"].values()) and (np.isclose(balance["charge"], 0))
     
 
 
@@ -391,3 +392,49 @@ def get_integer_coefficients(reaction):
                 factor = 1/np.absolute(coeff)
                 break
     return factor
+
+
+replace_capital_ids = re.compile(r"([A-Z])([A-Z])(\d+)")
+replace_deuterium = re.compile(r"D([^ybs]|$)")
+replace_tritium = re.compile(r"T([^abceslhmi]|$)")
+replace_rest_R = re.compile(r"R\d*([^abefghnu]|$)")
+replace_rest_X = re.compile(r"X\d*([^e]|$)")
+replace_placeholders = re.compile(r"[*\.]\d*")
+remove_1 = re.compile(r"([A-Z][a-z]?)(1)([A-Z]|$)")
+remove_isotope_notation = re.compile(r"\[\d+([A-Z][a-z]?)\]")
+
+def clean_formula(formula):
+    """
+    Function to clean a given formula of possible artifacts.
+    
+        - Replaces Deuterium and Tritium with Hydrogen
+
+        - Removes any 1s from atom counts
+
+        - Removes isotope notations
+
+        - Replaces any wildcard symbol with "R"
+
+    Args:
+        formula (str): Mass formula which should be cleaned.
+
+    Returns:
+        Cleaned formula.
+    """
+    # replace different hydrogen symbols
+    formula = replace_deuterium.sub("H", formula)
+    formula = replace_tritium.sub("H", formula)
+    # replace 1s
+    formula = remove_1.sub(r"\1\3", formula)
+    # remove isotope notation
+    formula = remove_isotope_notation.sub(r"\1", formula)
+    # gather rest symbols
+    if not ((found_R := replace_rest_R.search(formula)) is None):
+        formula = replace_rest_R.sub(r"\1", formula)
+    if not ((found_X := replace_rest_X.search(formula)) is None):
+        formula = replace_rest_X.sub(r"\1", formula)
+    if not ((found_other := replace_placeholders.search(formula)) is None):
+        formula = replace_placeholders.sub("", formula)
+    if any([found_R, found_X, found_other]):
+        formula += "R"
+    return formula
