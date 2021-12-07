@@ -25,6 +25,7 @@ A report about the chosen assignments for every metabolite can be generated with
 
 As an example we can look at all metabolites for which no or incomplete information was available with:
 ```
+import pandas as pd
 df = balancer.generate_metabolite_report(f"{model.id}_metaoblites")
 pd.set_option('display.max_rows', None) # displays entire DF, takes a while
 df[df["Inferrence Type"] != "Clean"]
