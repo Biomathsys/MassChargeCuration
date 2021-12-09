@@ -46,6 +46,8 @@ class DataCollector:
         self.strict_linkback = True
         try:
             os.makedirs(self.data_path)
+        except PermissionError:
+            raise PermissionError
         except OSError:
             pass
         self._load_default_interfaces(data_path, biocyc_path)
@@ -112,7 +114,7 @@ class DataCollector:
                                     formula = (formula[0], None)
                                 else:
                                     continue
-                            formula = (clean_formula(formula[0]), formula[1])
+                            formula = (clean_formula(formula[0]), int(formula[1]) if not formula[1] is None else None)
                             cur_db = formulae.get(formula, set())
                             cur_db.add((db_id, identifier))
                             formulae[formula] = cur_db

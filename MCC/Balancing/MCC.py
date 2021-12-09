@@ -15,7 +15,7 @@ remove_H = re.compile(r"H\d*([^gfe]|$)") # remember to not also remove H from Hg
 
 class MassChargeCuration:
     
-    def __init__(self, model, data_collector = None, data_path = "../data", fixed_assignments = None, fixed_reactions = None, run_optimization = True, **kw):
+    def __init__(self, model, data_collector = None, data_path = "/data", fixed_assignments = None, fixed_reactions = None, run_optimization = True, **kw):
         total_time = time.process_time()
         self.model = model
         self.pseudo_reactions = get_pseudo_reactions(model)
@@ -89,7 +89,6 @@ class MassChargeCuration:
                     if count > 1:
                         unchecked_metabolites.update(wildcard_metabolites.intersection(reaction.metabolites))
                         unchecked_metabolites.discard(unchecked_metabolite)
-        print(inferred) 
         # for inferred formulae we add ECO terms
         for inferred_metabolite in inferred:
             inferred_metabolite.annotation["eco"] = "ECO:0000305"
@@ -241,6 +240,8 @@ class MassChargeCuration:
                 unbalance_type.append("Charge")
             if len(unbalance_type) != 0:
                 reason = self.reaction_reasons.get(reaction.id, [])
+                if len(reason) == 0:
+                    reason == [reaction.id]
                 reaction_report.append({"Id" : reaction.id,
                                         "Unbalanced Reaction" : str(reaction),
                                         "Unbalanced Type" : ", ".join(unbalance_type),
@@ -363,7 +364,7 @@ class MassChargeCuration:
         
         for metabolite_id, info in information.items():
             if not info["Reasoning"].startswith("Target"):
-                if same_formula(info["Determined Formula"], info["Previous Formula"], ignore_rest = True):
+                if same_formula(info["Determined Formula"], info["Previous Formula"], ignore_rest = True) and (info["Determined Charge"] == info["Previous Charge"]):
                     info["Reasoning"] = f"unconstrained Target{' & ' if info['Reasoning'] != '' else ''}{info['Reasoning']}"
 
 

@@ -70,8 +70,6 @@ class FormulaOptimizer(FullBalancer):
         self.metabolite_symbols[metabolite.id] = element_symbols
 
         original_metabolite = self.target_model.metabolites.get_by_id(metabolite.id)
-        if metabolite.id in ["trnaglu_c", "glutrna_c"]:
-            print(f"{metabolite.id}: original: {original_metabolite.formula}, {original_metabolite.charge}, adhered: {metabolite.formula, metabolite.charge}")
         if same_formula(metabolite.formula, clean_formula(original_metabolite.formula), ignore_rest = True) and metabolite.charge == original_metabolite.charge:
             charge_constraint = self.charge_symbols[metabolite.id] == metabolite.charge
             constraints.append(z3.And(*[element_symbols[element] == metabolite.elements.get(element, 0) for element in self.relevant_elements], charge_constraint))

@@ -27,14 +27,14 @@ class ModelSEEDInterface(DatabaseInterface):
             logging.warning("ModelSEED interface is currently only implemented to download the entire database.")
             self.df = pd.DataFrame()
         try:
-            self.df = pd.read_csv(f"{self.data_path}/ModelSEED_compounds.tsv", sep = "\t")
+            self.df = pd.read_csv(f"{self.data_path}/ModelSEED_compounds.tsv", sep = "\t", dtype=object)
         except FileNotFoundError:
             base_url = "https://raw.githubusercontent.com/ModelSEED/ModelSEEDDatabase/master/Biochemistry/compounds.tsv"
             result = requests.get(base_url)
             result.raise_for_status()
             with open(f"{self.data_path}/ModelSEED_compounds.tsv", "w") as f:
                 f.write(result.text)
-            self.df = pd.read_csv(f"{self.data_path}/ModelSEED_compounds.tsv", sep = "\t")
+            self.df = pd.read_csv(f"{self.data_path}/ModelSEED_compounds.tsv", sep = "\t", dtype=object)
 
             
     def get_formulae_by_id(self, meta_id):
