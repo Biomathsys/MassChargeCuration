@@ -206,40 +206,55 @@ class DataCollector:
         
         # fetching missing ids from other information
         for db_identifier in missing_links:
-            if (not (found := self.interfaces[db_identifier].search_identifier(names, DB_ids)) is None) and (len(found) > 0):
-                DB_ids[db_identifier]["ids"].update(found)
-                logging.info(f"Found new ids {found} in {db_identifier} via id & name based search for {metabolite.id}")
-                check_list.update([(db_identifier, meta_id.replace("META:", "")) for meta_id in DB_ids[db_identifier]["ids"]])
+            try:
+                if (not (found := self.interfaces[db_identifier].search_identifier(names, DB_ids)) is None) and (len(found) > 0):
+                    DB_ids[db_identifier]["ids"].update(found)
+                    logging.info(f"Found new ids {found} in {db_identifier} via id & name based search for {metabolite.id}")
+                    check_list.update([(db_identifier, meta_id.replace("META:", "")) for meta_id in DB_ids[db_identifier]["ids"]])
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                logging.exception(f"Error searching for identifier in {db_identifier}:")
 
         #update identifiers
         flattened_ids = [meta_id.replace("META:", "") for meta_ids in DB_ids.values() for meta_id in meta_ids["ids"]]
         for db_identifier in self.interfaces:
-            old, new = self.interfaces[db_identifier].update_ids(flattened_ids, names)
-            check_list.difference_update([(db_identifier, meta_id) for meta_id in old])
-            DB_ids[db_identifier]["ids"].difference_update(old)
-            check_list.update([(db_identifier, meta_id) for meta_id in new])
-            DB_ids[db_identifier]["ids"].update(new)
+            try:
+                old, new = self.interfaces[db_identifier].update_ids(flattened_ids, names)
+                check_list.difference_update([(db_identifier, meta_id) for meta_id in old])
+                DB_ids[db_identifier]["ids"].difference_update(old)
+                check_list.update([(db_identifier, meta_id) for meta_id in new])
+                DB_ids[db_identifier]["ids"].update(new)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                logging.exception(f"Error updating identifier in {db_identifier}:")
 
         # iteratively trying to gather more ids and pruning potential metaNetX ids
         while len(check_list) > 0:
             next_id = check_list.pop()
-            result = self.interfaces[next_id[0]].get_other_references(next_id[1], self.used_annotations)
-            if result is None: continue
-            for database_id, meta_ids in result.items():
-                if (meta_ids is None) or (database_id not in self.used_annotations): continue
-                for meta_id in meta_ids:
-                    meta_id = meta_id.replace("META:", "")
-                    if (meta_id not in DB_ids[database_id]["ids"]):
-                        if (meta_id in DB_ids[database_id]["old_ids"]):
-                            _, new_ids = self.interfaces[database_id].update_ids(meta_id)
-                        else:
-                            new_ids = [meta_id]
-                        for meta_id in new_ids:
-                            back_references = self.interfaces[database_id].get_other_references(meta_id, self.used_annotations)
-                            back_ref = back_references.get(next_id[0], [])
-                            strict_condition = self.strict_linkback or len(back_references) != 0
-                            if (not strict_condition) or ((not back_ref is None) and (next_id[1] in back_ref)):
-                                DB_ids[database_id]["ids"].add(meta_id)
-                                check_list.add((database_id, meta_id))
-                                logging.info(f"Found new id {meta_id} in {database_id} from {next_id} for {metabolite.id}")
+            try:
+                result = self.interfaces[next_id[0]].get_other_references(next_id[1], self.used_annotations)
+                if result is None: continue
+                for database_id, meta_ids in result.items():
+                    if (meta_ids is None) or (database_id not in self.used_annotations): continue
+                    for meta_id in meta_ids:
+                        meta_id = meta_id.replace("META:", "")
+                        if (meta_id not in DB_ids[database_id]["ids"]):
+                            if (meta_id in DB_ids[database_id]["old_ids"]):
+                                _, new_ids = self.interfaces[database_id].update_ids(meta_id)
+                            else:
+                                new_ids = [meta_id]
+                            for meta_id in new_ids:
+                                back_references = self.interfaces[database_id].get_other_references(meta_id, self.used_annotations)
+                                back_ref = back_references.get(next_id[0], [])
+                                strict_condition = self.strict_linkback or len(back_references) != 0
+                                if (not strict_condition) or ((not back_ref is None) and (next_id[1] in back_ref)):
+                                    DB_ids[database_id]["ids"].add(meta_id)
+                                    check_list.add((database_id, meta_id))
+                                    logging.info(f"Found new id {meta_id} in {database_id} from {next_id} for {metabolite.id}")
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                logging.exception(f"Error getting other identifiers:")
         return DB_ids, names

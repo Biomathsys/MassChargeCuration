@@ -83,7 +83,10 @@ class BioCycInterface(DatabaseInterface):
         if len(names) == 0: return None
         response = requests.post("https://biocyc.org/META/metabolite-translation-service?=file", files = {"file" : query})
         df = pd.read_csv(StringIO(response.text), sep = "\t")
-        return [f"META:{biocyc_id}" for biocyc_id in df[df["Result"] == "success"].BioCyc.unique()]
+        if not "Result" in df.columns:
+            return []
+        else:
+            return [f"META:{biocyc_id}" for biocyc_id in df[df["Result"] == "success"].BioCyc.unique()]
 
     def get_other_references(self, id, relevant_dbs):
         id_mapping = {"METANETX" : "metanetx.chemical", # somewhat redundant
