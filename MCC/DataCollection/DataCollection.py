@@ -105,19 +105,26 @@ class DataCollector:
             if db_id in metabolite.annotation:
                 ids = [metabolite.annotation[db_id]] if type(metabolite.annotation[db_id]) != list else metabolite.annotation[db_id]
                 for identifier in ids:
-                    if not ((cur_formulae := interface.get_formulae_by_id(identifier)) is None):
-                        logging.debug(f"{db_id}, {identifier}")
-                        for formula in cur_formulae:
-                            if (type(formula[0]) == float) or (formula[0] is None): continue
-                            if (type(formula[1]) ==float) and np.isnan(formula[1]) or (formula[1] is None):
-                                if self.allow_undefined_charge:
-                                    formula = (formula[0], None)
-                                else:
-                                    continue
-                            formula = (clean_formula(formula[0]), int(formula[1]) if not formula[1] is None else None)
-                            cur_db = formulae.get(formula, set())
-                            cur_db.add((db_id, identifier))
-                            formulae[formula] = cur_db
+                    try:
+                        if not ((cur_formulae := interface.get_formulae_by_id(identifier)) is None):
+                            logging.debug(f"{db_id}, {identifier}")
+                            for formula in cur_formulae:
+                                if (type(formula[0]) == float) or (formula[0] is None): continue
+                                if (type(formula[1]) ==float) and np.isnan(formula[1]) or (formula[1] is None):
+                                    if self.allow_undefined_charge:
+                                        formula = (formula[0], None)
+                                    else:
+                                        continue
+                                formula = (clean_formula(formula[0]), int(formula[1]) if not formula[1] is None else None)
+                                cur_db = formulae.get(formula, set())
+                                cur_db.add((db_id, identifier))
+                                formulae[formula] = cur_db
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as e:
+                        logging.exception(f"Error getting formula for {identifier} in {db_id}:")
+
+
         return formulae
 
 
