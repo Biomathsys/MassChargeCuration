@@ -1,5 +1,24 @@
 # MassChargeCuration
+========================================
+
 Python module to automatically curate the mass and charge assignments for metabolites in a metabolic model.
+
+
+[![License (MIT Licence)](https://img.shields.io/badge/license-MIT-blue.svg?style=plastic)](https://opensource.org/licenses/MIT)
+![Lines of Code](https://img.shields.io/tokei/lines/github/Finnem/MassChargeCuration?color=orange&style=plastic)
+![Download count](https://img.shields.io/github/downloads/Finnem/MassChargeCuration/total.svg?style=plastic)
+
+----
+*Authors*: [Finn Mier](https://uni-tuebingen.de/en/fakultaeten/mathematisch-naturwissenschaftliche-fakultaet/fachbereiche/informatik/lehrstuehle/systems-biology/team/),
+[Reihaneh Mostolizadeh](https://uni-tuebingen.de/en/fakultaeten/mathematisch-naturwissenschaftliche-fakultaet/fachbereiche/informatik/lehrstuehle/systems-biology/team/dr-reihaneh-mostolizadeh/)
+
+
+*Repository*: [https://github.com/Finnem/MassChargeCuration](https://github.com/Finnem/MassChargeCuration)
+
+
+
+► Getting started with MassChargeCuration
+----------------------------
 
 Requires Microsoft Research's Z3 to run. You can download it from https://github.com/Z3Prover/z3.
 
@@ -37,3 +56,13 @@ df = balancer.generate_metabolite_report(f"{model.id}_metaoblites")
 pd.set_option('display.max_rows', None) # displays entire DF, takes a while
 df[df["Similarity"] != "Same"]
 ```
+
+
+☮ Licensing and distribution
+----------------------------
+
+MassChargeCuration is Copyright (C) 2021-2022 by the following organization:
+
+The University of Tuebingen, Germany
+
+MassChargeCuration is free software; you can redistribute it and/or modify it under the terms of the GNU Lesser General Public License as published by the Free Software Foundation.
