@@ -2,7 +2,6 @@ import re
 import codecs
 import json
 import requests
-import cobra
 import logging
 import pandas as pd
 

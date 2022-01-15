@@ -1,9 +1,11 @@
-import cobra
 import logging
 import sys
 import numpy as np
 import re
 import z3
+import re 
+element_re = re.compile("([A-Z][a-z]?)([0-9.]+[0-9.]?|(?=[A-Z])?)")
+
 
 logging_is_setup = False
 def logging_setup(loglevel = "info"): 
@@ -44,7 +46,7 @@ def get_assertion_leafs(assertion):
 def formula_to_dict(string):
     '''
     Function to convert a formula given as a string to a dictionary representing the formula.
-    
+    Adjusted from cobrapy package.
     Args:
         string: The formula as a string.
         
@@ -53,9 +55,39 @@ def formula_to_dict(string):
         {'C': 48, 'H': 67, 'N': 14, 'O': 38, 'P': 6, 'S': 2}
         
     '''
-    formula = cobra.core.formula.Formula(string)
-    formula.parse_composition()
-    return formula.elements
+    tmp_formula = string
+    # commonly occuring characters in incorrectly constructed formulas
+    if "*" in tmp_formula:
+        logging.warn("invalid character '*' found in formula '%s'" % string)
+        tmp_formula = string.replace("*", "")
+    if "(" in tmp_formula or ")" in tmp_formula:
+        logging.warn("parenthesis found in formula '%s'" % string)
+        return
+    composition = {}
+    parsed = element_re.findall(tmp_formula)
+    for (element, count) in parsed:
+        if count == "":
+            count = 1
+        else:
+            try:
+                count = float(count)
+                int_count = int(count)
+                if count == int_count:
+                    count = int_count
+                else:
+                    logging.warn(
+                        "%s is not an integer (in formula %s)"
+                        % (count, string)
+                    )
+            except ValueError:
+                logging.warn("failed to parse %s (in formula %s)" % (count, string))
+                composition = {}
+                return
+        if element in composition:
+            composition[element] += count
+        else:
+            composition[element] = count
+    return composition
 
 def dict_to_formula(formula_dict):
     '''
@@ -438,3 +470,37 @@ def clean_formula(formula):
     if any([found_R, found_X, found_other]):
         formula += "R"
     return formula
+
+
+def get_sbml_annotations(sbml_object):
+    identifiers = {}
+    annotations_node = sbml_object.getAnnotation() 
+    for i in range(annotations_node.getNumChildren()):
+        child_rdf = annotations_node.getChild(i)
+        if child_rdf.getName() == "RDF":
+            for i in range(child_rdf.getNumChildren()):
+                child_dscr = child_rdf.getChild(i)
+                if child_dscr.getName() == "Description":
+                    for i in range(child_dscr.getNumChildren()):
+                        child_is = child_dscr.getChild(i)
+                        if child_is.getName() == "is":
+                            for i in range(child_is.getNumChildren()):
+                                child_bag = child_is.getChild(i)
+                                if child_bag.getName() == "Bag":
+                                    for i in range(child_bag.getNumChildren()):
+                                        child_anno = child_bag.getChild(i)
+                                        attributes = child_anno.getAttributes()
+                                        for i in range(attributes.getNumAttributes()):
+                                            if attributes.getName(i) == "resource":
+                                                attribute = attributes.getValue(i)
+                                                splitted = attribute.split("/")
+                                                identifier = splitted[-1]
+                                                db_id = splitted[-2]
+                                                identifiers[db_id] = identifier
+    return identifiers
+
+def get_fbc_plugin(sbml_object):
+    for i in range(sbml_object.num_plugins):
+        plugin = sbml_object.getPlugin(i)
+        if plugin.package_name == "fbc":
+            return plugin

@@ -123,8 +123,6 @@ class MetaNetXInterface(DatabaseInterface):
             old_ids.update(old)
         return old_ids, new_ids
             
-        ids["metanetx.chemical"]["ids"] = new_ids
-        return old, new_ids
         
 
     def get_other_references(self, id, relevant_dbs):

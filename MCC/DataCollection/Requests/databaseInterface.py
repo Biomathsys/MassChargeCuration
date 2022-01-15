@@ -1,8 +1,6 @@
 import json
 import requests
-import cobra
 import logging
-import libsbml
 import os
 
 class DatabaseInterface():

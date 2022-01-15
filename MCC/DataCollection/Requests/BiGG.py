@@ -1,10 +1,10 @@
 import json
 import requests
-import cobra
 import logging
 import libsbml
 import os
 
+from ...util import get_sbml_annotations, get_fbc_plugin
 from .databaseInterface import DatabaseInterface
 
 class BiGGInterface(DatabaseInterface):
@@ -68,25 +68,24 @@ class BiGGInterface(DatabaseInterface):
         BiGG_Database = {}
         incomplete_models = {}
         for model_name in os.listdir(f"{self.data_path}/BiGG_models"):
-            model = cobra.io.read_sbml_model(f"{self.data_path}/BiGG_models/{model_name}")
             reader = libsbml.SBMLReader()
             document = reader.readSBMLFromFile(f"{self.data_path}/BiGG_models/{model_name}")
             sbml_model = document.getModel()
-            for metabolite in model.metabolites:
-                meta_dict = BiGG_Database.get(metabolite.id[:-2], {})
-                sbml_metabolite = sbml_model.getSpecies("M_{}".format(metabolite.id))
-                sbml_plugin = sbml_metabolite.getPlugin(0)
-                if ((metabolite.formula is None) or (not sbml_plugin.isSetCharge())):
+            for metabolite in sbml_model.getListOfSpecies():
+                meta_dict = BiGG_Database.get(metabolite.id[2:-2], {})
+                sbml_plugin = get_fbc_plugin(metabolite) #assuming Plugin(0) contains always charge?
+                if ((not sbml_plugin.isSetChemicalFormula()) or (not sbml_plugin.isSetCharge())):
                     model_dict = incomplete_models.get(model_name, {})
-                    model_dict[metabolite.id] = (metabolite.formula, metabolite.charge)
+                    model_dict[metabolite.id[2:]] = (sbml_plugin.chemical_formula, sbml_plugin.charge)
                     incomplete_models[model_name] = model_dict
                     continue
-                meta_dict[model_name[:-4]] = (metabolite.formula, metabolite.charge)
+                meta_dict[model_name[:-4]] = (sbml_plugin.chemical_formula, sbml_plugin.charge)
                 annotations = meta_dict.get("annotations", {})
                 names = meta_dict.get("names", set())
                 names.add(metabolite.name)
                 meta_dict["names"] = names
-                for anno, value in metabolite.annotation.items():
+                sbml_annotations = get_sbml_annotations(metabolite)
+                for anno, value in sbml_annotations.items():
                     annotation = annotations.get(anno, set())
                     if type(value) is list:
                         annotation.update(value)
@@ -94,7 +93,7 @@ class BiGGInterface(DatabaseInterface):
                         annotation.add(value)
                     annotations[anno] = annotation
                 meta_dict["annotations"] = annotations
-                BiGG_Database[metabolite.id[:-2]] = meta_dict
+                BiGG_Database[metabolite.id[2:-2]] = meta_dict
 
         for metabolite in BiGG_Database:
             for key, value in BiGG_Database[metabolite]["annotations"].items():
