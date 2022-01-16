@@ -1,7 +1,7 @@
 from .fullBalancer import FullBalancer
 import logging
 import z3
-from ..util import formula_to_dict, is_cH_balanced, same_formula, clean_formula
+from ..util import formula_to_dict, is_cH_balanced, same_formula, clean_formula, get_fbc_plugin
 import re
 
 remove_H = re.compile(r"H\d*([^gfe]|$)") # remember to not also remove H from Hg
@@ -64,20 +64,22 @@ class FormulaOptimizer(FullBalancer):
         """
         element_symbols = {}
         constraints = []
-        self.charge_symbols[metabolite.id] = z3.Int(f"charge_{metabolite.id}")
+        self.charge_symbols[metabolite.id[2:]] = z3.Int(f"charge_{metabolite.id[2:]}")
         for element in self.relevant_elements:
-            element_symbols[element] = z3.Int(f"{element}_{metabolite.id}")
-        self.metabolite_symbols[metabolite.id] = element_symbols
+            element_symbols[element] = z3.Int(f"{element}_{metabolite.id[2:]}")
+        self.metabolite_symbols[metabolite.id[2:]] = element_symbols
 
-        original_metabolite = self.target_model.metabolites.get_by_id(metabolite.id)
-        if same_formula(metabolite.formula, clean_formula(original_metabolite.formula), ignore_rest = True) and metabolite.charge == original_metabolite.charge:
-            charge_constraint = self.charge_symbols[metabolite.id] == metabolite.charge
-            constraints.append(z3.And(*[element_symbols[element] == metabolite.elements.get(element, 0) for element in self.relevant_elements], charge_constraint))
+        plugin = get_fbc_plugin(metabolite)
+        original_plugin = get_fbc_plugin(self.target_model.getSpecies(metabolite.id))
+        metabolite_elements = formula_to_dict(plugin.chemical_formula)
+        if same_formula(plugin.chemical_formula, clean_formula(original_plugin.chemical_formula), ignore_rest = True) and metabolite.charge == original_plugin.charge:
+            charge_constraint = self.charge_symbols[metabolite.id[2:]] == plugin.charge
+            constraints.append(z3.And(*[element_symbols[element] == metabolite_elements.get(element, 0) for element in self.relevant_elements], charge_constraint))
         else:
-            for assignment in self.assignments[metabolite.id]:
+            for assignment in self.assignments[metabolite.id[2:]]:
                 dict_formula = formula_to_dict(assignment[0])
                 if (not assignment[1] is None):
-                    charge_constraint = self.charge_symbols[metabolite.id] == assignment[1]
+                    charge_constraint = self.charge_symbols[metabolite.id[2:]] == assignment[1]
                 else:
                     charge_constraint = True
                 if "R" in dict_formula:
@@ -87,8 +89,8 @@ class FormulaOptimizer(FullBalancer):
         if len(constraints) > 0:
             return z3.Or(constraints)
         else:
-            self.unknown_metabolites.add(metabolite.id)
-            logging.debug(f"No assignments for {metabolite.id} found.")
+            self.unknown_metabolites.add(metabolite.id[2:])
+            logging.debug(f"No assignments for {metabolite.id[2:]} found.")
             return z3.And(*[element_symbols[element] >= 0 for element in self.relevant_elements])
 
     def _add_soft_constraints(self):
@@ -103,14 +105,14 @@ class FormulaOptimizer(FullBalancer):
             2. no unnecessary atoms
 
         """
-        for metabolite in self.model.metabolites:
+        for metabolite in self.model.getListOfSpecies():
             # if there is no constraint on a metabolite formula, we want it to become 0
-            if metabolite in self.unknown_metabolites:
+            if metabolite.id[2:] in self.unknown_metabolites:
                 for element in self.relevant_elements:
-                    self.solver.add_soft(self.metabolite_symbols[metabolite.id][element] == 0)
+                    self.solver.add_soft(self.metabolite_symbols[metabolite.id[2:]][element] == 0)
 
             # if there is multiple formula, we prefer larger ones
-            assignments = set(f for f in self.assignments[metabolite.id])
+            assignments = set(f for f in self.assignments[metabolite.id[2:]])
             if len(assignments) > 1:
                 dict_formulae = [(formula_to_dict(f[0]), f[1]) for f in assignments]
                 length_sorted_formulae = list(sorted(dict_formulae, key = lambda f: sum(f[0].values())))
@@ -118,9 +120,9 @@ class FormulaOptimizer(FullBalancer):
                     constraints = []
                     for element in length_sorted_formulae[i][0]:
                         if (element == "R"): continue
-                        constraints.append(self.metabolite_symbols[metabolite.id][element] == length_sorted_formulae[i][0].get(element, 0))
+                        constraints.append(self.metabolite_symbols[metabolite.id[2:]][element] == length_sorted_formulae[i][0].get(element, 0))
                     if not (length_sorted_formulae[i][1] is None):
-                        constraints.append(self.charge_symbols[metabolite.id] == length_sorted_formulae[i][1])
+                        constraints.append(self.charge_symbols[metabolite.id[2:]] == length_sorted_formulae[i][1])
                     self.solver.add_soft(z3.And(constraints), weight = 10 * (i + 1))
             """
                 # if the formula is unconstrained, we prefer to choose a partial representation from a database

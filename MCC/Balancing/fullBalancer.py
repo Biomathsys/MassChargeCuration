@@ -1,5 +1,6 @@
+from multiprocessing.sharedctypes import Value
 from .modelBalancer import ModelBalancer
-from ..util import formula_to_dict, get_integer_coefficients, same_formula
+from ..util import formula_to_dict, get_integer_coefficients, same_formula, get_sbml_metabolites, get_fbc_plugin, dict_to_formula
 import logging
 import re
 import z3
@@ -26,7 +27,7 @@ class FullBalancer(ModelBalancer):
         self.answer_literals = {}
         self.impartial_information = set() # TODO: still used?
         if target_model is None:
-            self.target_model = model.copy()
+            self.target_model = model.clone()
         else:
             self.target_model = target_model
         super().__init__(model, data_collector, fixed_assignments,  **kw)
@@ -63,7 +64,7 @@ class FullBalancer(ModelBalancer):
         """
         self.metabolite_symbols = {}
         self.charge_symbols = {}
-        for metabolite in self.model.metabolites:
+        for metabolite in self.model.getListOfSpecies():
             self.goal.add(self._generate_metabolite_assertion(metabolite))
 
     def _generate_metabolite_assertion(self, metabolite):
@@ -76,27 +77,27 @@ class FullBalancer(ModelBalancer):
         """
         element_symbols = {}
         constraints = []
-        self.charge_symbols[metabolite.id] = z3.Int(f"charge_{metabolite.id}")
+        self.charge_symbols[metabolite.id[2:]] = z3.Int(f"charge_{metabolite.id[2:]}")
         for element in self.relevant_elements:
-            element_symbols[element] = z3.Int(f"{element}_{metabolite.id}")
-        self.metabolite_symbols[metabolite.id] = element_symbols
-        for assignment in self.assignments[metabolite.id]:
+            element_symbols[element] = z3.Int(f"{element}_{metabolite.id[2:]}")
+        self.metabolite_symbols[metabolite.id[2:]] = element_symbols
+        for assignment in self.assignments[metabolite.id[2:]]:
             dict_formula = formula_to_dict(assignment[0])
             if (not assignment[1] is None):
-                charge_constraint = self.charge_symbols[metabolite.id] == assignment[1]
+                charge_constraint = self.charge_symbols[metabolite.id[2:]] == assignment[1]
             else:
                 charge_constraint = True
             if "R" in dict_formula:
                 constraints.append(z3.And(*[element_symbols[element] >= dict_formula.get(element, 0) for element in self.relevant_elements], charge_constraint))
-                self.unknown_metabolites.add(metabolite.id)
+                self.unknown_metabolites.add(metabolite.id[2:])
             else:
                 constraints.append(z3.And(*[element_symbols[element] == dict_formula.get(element, 0) for element in self.relevant_elements], charge_constraint))
 
         if len(constraints) > 0:
             return z3.Or(constraints)
         else:
-            self.unknown_metabolites.add(metabolite.id)
-            logging.debug(f"No assignments for {metabolite.id} found.")
+            self.unknown_metabolites.add(metabolite.id[2:])
+            logging.debug(f"No assignments for {metabolite.id[2:]} found.")
             return z3.And(*[element_symbols[element] >= 0 for element in self.relevant_elements])
 
     def _generate_reaction_assertions(self):
@@ -107,21 +108,21 @@ class FullBalancer(ModelBalancer):
         Reaction assertions encode that every reaction must be balanced w.r.t. mass and charge, 
         disregarding proton differences (i.e. balanced <=> dH == dCharge).
         """
-        for reaction in self.model.reactions:
+        for reaction in self.model.getListOfReactions():
             if reaction.id in self.unbalancable_reactions: continue
             element_balances = {element : 0 for element in self.relevant_elements}
             factor = get_integer_coefficients(reaction)
             if not (factor is None):
                 hydrogen_balance = 0
                 charge_balance = 0
-                for metabolite, coeff in reaction.metabolites.items():
+                for metabolite_id, coeff in get_sbml_metabolites(reaction).items():
                     coeff *= factor
                     for element in self.relevant_elements:
                         if element == "H": continue
-                        element_balances[element] = element_balances[element] + (int(coeff) * self.metabolite_symbols[metabolite.id][element])
-                    hydrogen_balance = hydrogen_balance + (int(coeff) * self.metabolite_symbols[metabolite.id]["H"])
-                    charge_balance = charge_balance + (int(coeff) * self.charge_symbols[metabolite.id])
-                answer_literal = z3.Bool(f"R_{reaction.id}")
+                        element_balances[element] = element_balances[element] + (int(coeff) * self.metabolite_symbols[metabolite_id][element])
+                    hydrogen_balance = hydrogen_balance + (int(coeff) * self.metabolite_symbols[metabolite_id]["H"])
+                    charge_balance = charge_balance + (int(coeff) * self.charge_symbols[metabolite_id])
+                answer_literal = z3.Bool(reaction.id)
                 self.answer_literals[reaction.id] = answer_literal
                 implication = z3.Implies(answer_literal, z3.And(*[element_balances[element] == 0 for element in self.relevant_elements], (hydrogen_balance) == (charge_balance)))
                 self.goal.add(implication)
@@ -136,25 +137,42 @@ class FullBalancer(ModelBalancer):
         """
         m = self.solver.model() if model is None else model
         set_values = set()
-        for metabolite in self.model.metabolites:
+        for metabolite in self.model.getListOfSpecies():
             element_dict = {}
+            plugin = get_fbc_plugin(metabolite)
+            metabolite_elements = plugin.chemical_formula
+            metabolite_elements = formula_to_dict(metabolite_elements)
             for element in self.relevant_elements:
-                if (not (((assigned_value := m[self.metabolite_symbols[metabolite.id][element]]) is None)) and (assigned_value.as_long() != 0)) or (element in metabolite.elements):
-                    element_dict[element] = assigned_value
-                    set_values.add(metabolite)
-            metabolite.elements = element_dict
-            charge = m[self.charge_symbols[metabolite.id]]
+                if (not (((assigned_value := m[self.metabolite_symbols[metabolite.id[2:]][element]]) is None)) and (assigned_value.as_long() != 0)) or (element in metabolite_elements):
+                    element_dict[element] = assigned_value.as_long()
+                    set_values.add(metabolite.id[2:])
+            if type((p := plugin.setChemicalFormula(dict_to_formula(element_dict)))) == int and p < 0:
+                logging.error(f"Setting chemical formula for {metabolite.id} to {dict_to_formula(element_dict)} failed with code {p}")
+                raise ValueError
+            charge = m[self.charge_symbols[metabolite.id[2:]]]
             if charge == None:
-                metabolite.charge = 0
-                metabolite.notes["charge inferrence"] = "unknown charge"
+                if type(p := plugin.setCharge(0)) == int and p < 0:
+                    logging.error(f"Setting chemical formula for {metabolite.id} to {0} failed with code {p}")
+                    raise ValueError
+                
+                # since note appending does not work / documentation is unclear, we use a workaround
+                old_str = metabolite.notes_string[10:-17]
+                metabolite.setNotes(old_str + f'''<p>charge inferrence: unknown charge</p>\n</html>''')
             else:
-                metabolite.charge = charge.as_long()
-            if (metabolite.id in self.unknown_metabolites) and (element_dict.get('H', 0) == 0 and metabolite.charge < 0 and self.target_model.metabolites.get_by_id(metabolite.id).charge != metabolite.charge) or metabolite.charge < -8: 
-                logging.debug(f"adjusting hydrogen count for {metabolite.id}, from {metabolite.elements.get('H', 0)} to {-metabolite.charge}")
+                if type(p := plugin.setCharge(charge.as_long())) == int and p < 0:
+                    logging.error(f"Setting chemical formula for {metabolite.id} to {charge.as_long()} failed with code {p}")
+                    raise ValueError
+            target_plugin = get_fbc_plugin(self.target_model.getSpecies(metabolite.id))
+            if (metabolite.id[2:] in self.unknown_metabolites) and (element_dict.get('H', 0) == 0 and plugin.charge < 0 and target_plugin.charge != metabolite.charge) or plugin.charge < -8: 
+                logging.debug(f"adjusting hydrogen count for {metabolite.id[2:]}, from {metabolite_elements.get('H', 0)} to {-plugin.charge}")
                 if element_dict.get('H', 0) == 0: # adjust hydrogen counts and charges for unknown formulae
-                    element_dict['H'] = -metabolite.charge
-                    metabolite.elements = element_dict
-                    metabolite.charge = 0
+                    element_dict['H'] = -plugin.charge
+                    if type((p := plugin.setChemicalFormula(dict_to_formula(element_dict)))) == int and p < 0:
+                        logging.error(f"Setting chemical formula for {metabolite.id} to {dict_to_formula(element_dict)} failed with code {p}")
+                        raise ValueError
+                    if type(p := plugin.setCharge(0)) == int and p < 0:
+                        logging.error(f"Setting chemical formula for {metabolite.id} to {0} failed with code {p}")
+                        raise ValueError
 
 
 
@@ -163,13 +181,14 @@ class FullBalancer(ModelBalancer):
         Gathers all Elements which appear in self.model. Required to generate the corresponding z3 variables.
         """
         relevant_elements = set()
-        for metabolite in self.model.metabolites:
-            for assignment in self.assignments[metabolite.id]:
+        for metabolite in self.model.getListOfSpecies():
+            for assignment in self.assignments[metabolite.id[2:]]:
                 dict_formula = formula_to_dict(assignment[0])
                 for key in dict_formula:
                     if key == "R": continue
                     relevant_elements.add(key)
-            for key in metabolite.elements:
+            metabolite_elements = formula_to_dict(get_fbc_plugin(metabolite).chemical_formula)
+            for key in metabolite_elements:
                 if key in ["R", "X", "*", "."]: continue
                 relevant_elements.add(key)
         return relevant_elements
@@ -196,19 +215,19 @@ class FullBalancer(ModelBalancer):
         ch_independant_assignments = {}
         # calculate cH difference, check rest formulae
         # nonH formula -> ch difference -> full formula
-        for metabolite in self.model.metabolites:
-            if metabolite.id in self.fixed_assignments:
+        for metabolite in self.model.getListOfSpecies():
+            if metabolite.id[2:] in self.fixed_assignments:
                 if(reduce):
-                    ch_independant_assignments[metabolite.id] = [self.fixed_assignments[metabolite.id]]
+                    ch_independant_assignments[metabolite.id[2:]] = [self.fixed_assignments[metabolite.id[2:]]]
                 else:
-                    assignment = self.fixed_assignments[metabolite.id]
+                    assignment = self.fixed_assignments[metabolite.id[2:]]
                     nonH_formula = remove_H.sub(r"\1", assignment[0])
                     assignment_dict = formula_to_dict(assignment[0])
                     if not assignment[1] is None:
                         diff = assignment_dict.get("H", 0) - assignment[1]
                     else:
                         diff = None
-                    ch_independant_assignments[metabolite.id] = {diff : {nonH_formula : self.fixed_assignments[metabolite.id]}}
+                    ch_independant_assignments[metabolite.id[2:]] = {diff : {nonH_formula : self.fixed_assignments[metabolite.id[2:]]}}
                 continue
             all_assignments = self.data_collector.get_assignments(metabolite, database_seperated=True)
             none_assignments = set()
@@ -231,8 +250,8 @@ class FullBalancer(ModelBalancer):
                     for diff, assignments in structured_assignments[nonH_formula].items():
                         best = None
                         for assignment in assignments:
-                            original_metabolite = self.target_model.metabolites.get_by_id(metabolite.id)
-                            if same_formula(assignment[0], original_metabolite.formula) and assignment[1] == original_metabolite.charge:
+                            original_plugin = get_fbc_plugin(self.target_model.getSpecies(metabolite.id))
+                            if same_formula(assignment[0], original_plugin.chemical_formula) and assignment[1] == original_plugin.charge:
                                 best = assignment
                                 break
                         if best is None:
@@ -244,9 +263,9 @@ class FullBalancer(ModelBalancer):
 
                         reduced_formulae.add(best)
                 if len(reduced_formulae) == 0:
-                    ch_independant_assignments[metabolite.id] = none_assignments
+                    ch_independant_assignments[metabolite.id[2:]] = none_assignments
                 else:
-                    ch_independant_assignments[metabolite.id] = reduced_formulae.union(none_assignments)
+                    ch_independant_assignments[metabolite.id[2:]] = reduced_formulae.union(none_assignments)
             else:
-                ch_independant_assignments[metabolite.id] = structured_assignments
+                ch_independant_assignments[metabolite.id[2:]] = structured_assignments
         return ch_independant_assignments

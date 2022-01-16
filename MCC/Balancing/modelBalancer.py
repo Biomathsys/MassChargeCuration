@@ -1,3 +1,4 @@
+from MCC.util import get_sbml_metabolites
 from .balancer import Balancer
 from ..util import get_pseudo_reactions
 import logging
@@ -22,10 +23,11 @@ class ModelBalancer(Balancer):
         self.data_collector = data_collector
         self.fixed_assignments = {} if fixed_assignments is None else fixed_assignments
         self.reaction_reasons = {}
+        self.metabolite_reactions = {}
         self.incomplete_formulae = set()
         self.unbalancable_reactions = get_pseudo_reactions(model)
         self.assignments = self._get_assignments()
-        self.unconstrained_formulae = self.find_unconstrained_metabolites()
+        #self.unconstrained_formulae = self.find_unconstrained_metabolites()
         super().__init__()
     
     def _get_assignments(self):
@@ -37,18 +39,25 @@ class ModelBalancer(Balancer):
             Dictionary mapping metabolite ids to their found assignments.
         """
         all_assignments = self.fixed_assignments.copy()
-        for metabolite in self.model.metabolites:
-            if metabolite.id in self.fixed_assignments:
+        for metabolite in self.model.getListOfSpecies():
+            if metabolite.id[2:] in self.fixed_assignments:
                 continue
             elif not (assignments := self.data_collector.get_assignments(metabolite, partial=self.include_partial_information)) is None:
                 if any(("R" in assignment[0]) for assignment in assignments):
-                    self.incomplete_formulae.add(metabolite)
-                all_assignments[metabolite.id] = assignments
+                    self.incomplete_formulae.add(metabolite.id[2:])
+                all_assignments[metabolite.id[2:]] = assignments
             else:
-                logging.error(f"No information for {metabolite.id} in DataCollector! You might want to gather information first or set a fixed assignment.")
+                logging.error(f"No information for {metabolite.id[2:]} in DataCollector! You might want to gather information first or set a fixed assignment.")
                 raise RuntimeError
+
+        for reaction in self.model.getListOfReactions():
+            for metabolite_id in get_sbml_metabolites(reaction):
+                cur_reactions = self.metabolite_reactions.get(metabolite_id, [])
+                cur_reactions.append(reaction.id)
+                self.metabolite_reactions[metabolite_id] = cur_reactions
         return all_assignments
 
+    """
     def find_unconstrained_metabolites(self):
         # TODO: check if this is still in use?
         unconstrained_formulae = self.incomplete_formulae.copy()
@@ -56,7 +65,8 @@ class ModelBalancer(Balancer):
         while len(to_check) != 0:
             cur_metabolite = to_check.pop()
             is_constrained = False
-            for reaction in cur_metabolite.reactions:
+            for reaction_id in self.metabolite_reactions.get(cur_metabolite.id[2:], []):
+                reaction = self.model.getReaction(f"R_{reaction_id}")
                 if len(set(reaction.metabolites.keys()).intersection(unconstrained_formulae)) == 1:
                     is_constrained = True
                     # TODO: detect multimetabolites
@@ -65,7 +75,7 @@ class ModelBalancer(Balancer):
                 for reaction in cur_metabolite.reactions:
                     to_check.update(unconstrained_formulae.intersection(set(reaction.metabolites.keys())))
         return unconstrained_formulae
-
+    """
             
 
 
@@ -106,14 +116,14 @@ class ModelBalancer(Balancer):
                     try_combinations(next_fixed, variable.copy())
                     
         options = []
-        for metabolite in reaction.metabolites:
-            if metabolite.id in possible_assignments:
-                if (len(possible_assignments[metabolite.id]) == 0) or any(("R" in assignment[0]) for assignment in self.assignments[metabolite.id]):
-                    options.append({"id" : metabolite.id, "assignment" : ["any"]})
+        for metabolite_id in get_sbml_metabolites(reaction):
+            if metabolite_id in possible_assignments:
+                if (len(possible_assignments[metabolite_id]) == 0) or any(("R" in assignment[0]) for assignment in self.assignments[metabolite_id]):
+                    options.append({"id" : metabolite_id, "assignment" : ["any"]})
                 else:
-                    options.append({"id" : metabolite.id, "assignment" : possible_assignments[metabolite.id]})
+                    options.append({"id" : metabolite_id, "assignment" : possible_assignments[metabolite_id]})
             else:
-                options.append({"id" : metabolite.id, "assignment" : ["any"]})
+                options.append({"id" : metabolite_id, "assignment" : ["any"]})
         if prod([len(s["assignment"]) for s in  options]) > 1e6:
             logging.debug(f"For {reaction.id} there were too many combinations: {prod([len(s['assignment']) for s in options])}. Not checking for direct balancability.")
             return []

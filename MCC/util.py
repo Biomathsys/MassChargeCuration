@@ -124,13 +124,14 @@ def non_hydrogen_balanced(reaction, assignments = None, unknown_is_balanced = Fa
 
     if assignments is None: assignments = {}
     mass_dict = {}
-    for metabolite, coeff in reaction.metabolites.items():
-        if metabolite.id not in assignments:
-            mass = metabolite.elements
-        elif assignments[metabolite.id] == "any": 
+    for metabolite_id, coeff in get_sbml_metabolites(reaction).items():
+        plugin = get_fbc_plugin(reaction.model.getSpecies(f"M_{metabolite_id}"))
+        if metabolite_id not in assignments:
+            mass = formula_to_dict(plugin.chemical_formula)
+        elif assignments[metabolite_id] == "any": 
                 mass = {}
         else:
-            mass = formula_to_dict(assignments[metabolite.id])
+            mass = formula_to_dict(assignments[metabolite_id])
         for atom, count in mass.items():
             if atom == "H": continue
             mass_dict[atom] = mass_dict.get(atom, 0) + (count * coeff)
@@ -151,17 +152,19 @@ def is_cH_balanced(reaction, assignments = None, unknown_is_balanced = False):
     """
     h_sum = 0
     charge_sum = 0
-    for metabolite, coeff in reaction.metabolites.items():
-        if metabolite.charge is None:
+    for metabolite_id, coeff in get_sbml_metabolites(reaction).items():
+        plugin = get_fbc_plugin(reaction.model.getSpecies(f"M_{metabolite_id}"))
+        if plugin.charge is None:
             return unknown_is_balanced
+        metabolite_elements = formula_to_dict(plugin.chemical_formula)
         if assignments is None:
-            h_sum += metabolite.elements.get("H", 0) * coeff
-            charge_sum += metabolite.charge * coeff
+            h_sum += metabolite_elements.get("H", 0) * coeff
+            charge_sum += plugin.charge * coeff
         else:
-            if ((assignments[metabolite.id][0] is None) or (assignments[metabolite.id][1] is None) or (assignments[metabolite.id] == "any")):
+            if ((assignments[metabolite_id][0] is None) or (assignments[metabolite_id][1] is None) or (assignments[metabolite_id] == "any")):
                 return unknown_is_balanced
-            h_sum += assignments[metabolite.id][0] * coeff
-            charge_sum += int(assignments[metabolite.id][1]) * coeff
+            h_sum += assignments[metabolite_id][0] * coeff
+            charge_sum += int(assignments[metabolite_id][1]) * coeff
         
     return h_sum == charge_sum # protons can be added to balance
         
@@ -178,11 +181,11 @@ def get_pseudo_reactions(model):
             => [pseudoreaction_ids]
     """
     pseudo_reactions = set()
-    for reaction in model.reactions:
-        if len(reaction.products) == 0 or len(reaction.reactants) == 0:
-            pseudo_reactions.add(reaction.id)
-        if ('sbo' in reaction.annotation and reaction.annotation['sbo'] == 'SBO:0000629') or ("growth" in reaction.id.lower()):
-            pseudo_reactions.add(reaction.id)
+    for reaction in model.getListOfReactions():
+        if reaction.getNumProducts() == 0 or reaction.getNumReactants() == 0:
+            pseudo_reactions.add(reaction.id[2:])
+        if (reaction.getSBOTerm() == 629) or ("growth" in reaction.id.lower()):
+            pseudo_reactions.add(reaction.id[2:])
     return pseudo_reactions
 
 
@@ -217,33 +220,39 @@ def adjust_proton_count(reaction):
     """
     charge_balance = 0
     h_balance = 0
-    for metabolite, coeff in reaction.metabolites.items():
-        charge_balance += metabolite.charge * coeff
-        h_balance += metabolite.elements.get("H", 0) * coeff
+    for metabolite_id, coeff in get_sbml_metabolites(reaction).items():
+        metabolite = reaction.model.getSpecies(f"M_{metabolite_id}")
+        plugin = get_fbc_plugin(metabolite)
+        charge_balance += plugin.charge * coeff
+        metabolite_elements = formula_to_dict(plugin.chemical_formula)
+        h_balance += metabolite_elements.get("H", 0) * coeff
     charge_balance = np.round(charge_balance)
     h_balance = np.round(h_balance)
     if charge_balance == h_balance:
         if charge_balance > 10:
             logging.info(f"added {charge_balance} protons to reaction {reaction.id}")
         h_id = None
-        for metabolite in reaction.metabolites:
-            if metabolite.id.startswith("h_"):
-                h_id = metabolite.id
+        for metabolite_id in get_sbml_metabolites(reaction):
+            if metabolite_id.startswith("M_h_"):
+                h_id = metabolite_id
                 break
         if h_id is None:
-            for metabolite in reaction.metabolites:
-                h_id = "h_{}".format(metabolite.id[-1])
+            for metabolite in get_sbml_metabolites(reaction):
+                h_id = "M_h_{}".format(metabolite_id[-1])
                 try:
-                    reaction.subtract_metabolites({h_id : 0})
+                    reaction.model.getSpecies(h_id)
                     break
                 except KeyError as e:
                     h_id = None
         if h_id is None:
             return 0
-        reaction.subtract_metabolites({h_id : charge_balance})
-        old_notes = reaction.notes
-        old_notes["Inferred"] = "Protons added to balance equation"
-        reaction.notes = old_notes
+        if charge_balance > 0:
+            reaction.addReactant(reaction.model.getSpecies(h_id), charge_balance)
+        else:
+            reaction.addProduct(reaction.model.getSpecies(h_id), charge_balance)
+        # since note appending does not work / documentation is unclear, we use a workaround
+        old_str = reaction.notes_string[10:-17]
+        reaction.setNotes(old_str + f'''<p>Inferred: {charge_balance} protons added to {'reactants' if charge_balance > 0 else 'products'} to balance equation.</p>\n</html>''')
         return charge_balance
     return 0
 
@@ -263,13 +272,15 @@ def calculate_balance(reaction, assignments = None):
     """
     charge_balance = 0
     mass_dict = {}
-    for metabolite, coeff in reaction.metabolites.items():
+    for metabolite_id, coeff in get_sbml_metabolites(reaction).items():
         if assignments:
-            mass = formula_to_dict(assignments[metabolite.id][0]) or {}
-            charge = assignments[metabolite.id][1] or 1
+            mass = formula_to_dict(assignments[metabolite_id][0]) or {}
+            charge = assignments[metabolite_id][1] or 1
         else:
-            mass = metabolite.elements or {}
-            charge = metabolite.charge or 0
+            metabolite = reaction.model.getSpecies(f"M_{metabolite_id}")
+            plugin = get_fbc_plugin(metabolite)
+            mass = formula_to_dict(plugin.chemical_formula) or {}
+            charge = plugin.charge or 0
         charge_balance += charge * coeff
         for atom, count in mass.items():
             mass_dict[atom] = mass_dict.get(atom, 0) + (count * coeff)
@@ -324,10 +335,16 @@ def apply_assignment(assignment, model):
 
     """
     for metabolite_id, a in assignment.items():
-        m = model.metabolites.get_by_id(metabolite_id)
-        e_dict = m.elements
-        e_dict.update(formula_to_dict(a))
-        m.elements = e_dict 
+        metabolite = model.getSpecies(f"M_{metabolite_id}")
+        plugin = get_fbc_plugin(metabolite)
+        logging.info(f"Setting formula for {metabolite_id} to {a[0]}")
+        if type((p := plugin.setChemicalFormula(a[0]))) == int and p < 0:
+            raise ValueError
+        metabolite = model.getSpecies(f"M_{metabolite_id}")
+        plugin = get_fbc_plugin(metabolite)
+        logging.info(f"is {plugin.chemical_formula} after.")
+        if type((p := plugin.setCharge(a[1]))) == int and p < 0:
+            raise ValueError
 
 def same_formula(f1, f2, ignore_rest = False):
     """
@@ -388,8 +405,9 @@ def get_proton_count(reaction):
         reaction (cobrapy.Reaction): Reaction for which we want to determine the proton balance.
     """
     total_count = 0
-    for metabolite, count in reaction.metabolites.items():
-        if metabolite.formula == "H":
+    for metabolite_id, count in get_sbml_metabolites(reaction).items():
+        plugin = get_fbc_plugin(reaction.model.getSpecies(f"M_{metabolite_id}"))
+        if plugin.chemical_formula == "H":
             total_count += np.absolute(count)
     return total_count
 
@@ -417,7 +435,7 @@ def get_integer_coefficients(reaction):
             logging.warning(f"Could not compute integer coefficients for reaction {reaction.id}... skipping it for now")
             return None
         non_int_found = False
-        for metabolite, coeff in reaction.metabolites.items():
+        for _, coeff in get_sbml_metabolites(reaction).items():
             coeff *= factor
             if not coeff.is_integer(): 
                 non_int_found = True
@@ -504,3 +522,28 @@ def get_fbc_plugin(sbml_object):
         plugin = sbml_object.getPlugin(i)
         if plugin.package_name == "fbc":
             return plugin
+
+def get_sbml_notes(sbml_object):
+    notes_dict = {}
+    notes = sbml_object.getNotes()
+    for i in range(notes.getNumChildren()):
+        html = notes.getChild(i)
+        if html.getName() == "html":
+            for i in range(html.getNumChildren()):
+                note = html.getChild(i)
+                if (note.getName() == "p") and (note.getNumChildren() >= 1) and (note.getChild(0).isText()):
+                    base_text = note.getChild(0).getCharacters()
+                    splitted = base_text.split(":")
+                    identifier = splitted[0]
+                    value = "".join(splitted[1:]).strip()
+                    notes_dict[identifier] = value
+    return notes_dict
+
+
+def get_sbml_metabolites(reaction):
+    metabolites = {}
+    for metabolite in reaction.getListOfProducts():
+        metabolites[metabolite.species[2:]] = metabolite.stoichiometry
+    for metabolite in reaction.getListOfReactants():
+        metabolites[metabolite.species[2:]] = -metabolite.stoichiometry
+    return metabolites

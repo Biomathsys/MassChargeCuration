@@ -1,3 +1,5 @@
+from __future__ import annotations
+from MCC.util import get_sbml_annotations
 import numpy as np
 import os
 from ..util import *
@@ -37,7 +39,7 @@ class DataCollector:
         biocyc_path (str): Optional; Path to biocyc database files.
     """
 
-    def __init__(self, model, data_path = "/data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None):
+    def __init__(self, model, data_path = "./data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None):
         self.model = model
         self.no_local = no_local
         self.interfaces = {}
@@ -101,14 +103,16 @@ class DataCollector:
 
         """
         formulae = {}
+        annotations = get_sbml_annotations(metabolite)
         for db_id, interface in self.interfaces.items():
-            if db_id in metabolite.annotation:
-                ids = [metabolite.annotation[db_id]] if type(metabolite.annotation[db_id]) != list else metabolite.annotation[db_id]
+            if db_id in annotations:
+                ids = [annotations[db_id]] if type(annotations[db_id]) != list else annotations[db_id]
                 for identifier in ids:
                     try:
                         if not ((cur_formulae := interface.get_formulae_by_id(identifier)) is None):
                             logging.debug(f"{db_id}, {identifier}")
                             for formula in cur_formulae:
+                                if formula is None: continue
                                 if (type(formula[0]) == float) or (formula[0] is None): continue
                                 if (type(formula[1]) ==float) and np.isnan(formula[1]) or (formula[1] is None):
                                     if self.allow_undefined_charge:
@@ -132,9 +136,9 @@ class DataCollector:
         """
         Gathers formulae and charges for all metabolites in self.model.
         """
-        for i, metabolite in enumerate(self.model.metabolites):
-            logging.info(f"{i + 1}/{len(self.model.metabolites)}: Getting information for {metabolite.id}")
-            self.assignments[metabolite.id] = self.get_formulae(metabolite)
+        for i, metabolite in enumerate(self.model.getListOfSpecies()):
+            logging.info(f"{i + 1}/{self.model.getNumSpecies()}: Getting information for {metabolite.id[2:]}")
+            self.assignments[metabolite.id[2:]] = self.get_formulae(metabolite)
 
     def get_assignments(self, metabolite, clean = True, partial = True, database_seperated = False):
         """
@@ -154,8 +158,8 @@ class DataCollector:
         if len(self.assignments) == 0:
             logging.warn("Tried to get assignments with no gathered information. Try calling gather_info before.")
             return None
-        assignments = self.assignments.get(metabolite.id, {})
-        if metabolite.notes.get("type", "metabolite") != "class":
+        assignments = self.assignments.get(metabolite.id[2:], {})
+        if get_sbml_notes(metabolite).get("type", "metabolite") != "class":
             filtered_assignments = {assignment: databases for assignment, databases in assignments.items() if not ("R" in assignment[0])} 
             if len(filtered_assignments) > 0:
                 assignments = filtered_assignments
@@ -173,16 +177,17 @@ class DataCollector:
         Updates/gathers all ids for all metabolites in the currently registered database interfaces.
         """
         now = time.process_time()
-        for i, metabolite in enumerate(self.model.metabolites):
-            logging.info(f"{i + 1}/{len(self.model.metabolites)}: {metabolite.id}")
+        for i, metabolite in enumerate(self.model.getListOfSpecies()):
+            logging.info(f"{i + 1}/{self.model.getNumSpecies()}: {metabolite.id[2:]}")
             ids = self.get_ids(metabolite)
             logging.debug(f"Ids were {ids}")
+            annotations = get_sbml_annotations(metabolite)
             for db in self.used_annotations: 
                 if db == "biocyc":
-                    metabolite.annotation[db] = [f"META:{entry}" for entry in ids[0][db]["ids"]]
+                    annotations[db] = [f"META:{entry}" for entry in ids[0][db]["ids"]]
                 else:
-                    metabolite.annotation[db] = list(ids[0][db]["ids"])
-            logging.debug(f"Updated metabolite {metabolite.id} annotations to {metabolite.annotation}")
+                    annotations[db] = list(ids[0][db]["ids"])
+            logging.debug(f"Updated metabolite {metabolite.id[2:]} annotations to {annotations}")
         logging.info(f"{time.process_time() - now}")
 
     def get_ids(self, metabolite):
@@ -197,17 +202,18 @@ class DataCollector:
                 => {db_identifer : {"old_ids" : [outdated ids], "ids" : set(current ids)}}
         """
 
-        names = [metabolite.name] if metabolite.name else ([metabolite.id] if metabolite.id else [])
+        names = [metabolite.name] if metabolite.name else ([metabolite.id[2:]] if metabolite.id else [])
         DB_ids = {db_identifier : {"old_ids": [], "ids" : set()} for db_identifier in self.used_annotations}
         missing_links = set(self.used_annotations)
         check_list = set()
         # taking ids from annotations
-        for db_identifier in metabolite.annotation:
+        annotations = get_sbml_annotations(metabolite)
+        for db_identifier in annotations:
             if db_identifier in self.used_annotations:
-                if type(metabolite.annotation[db_identifier]) is list:
-                    DB_ids[db_identifier]["ids"].update([meta_id.replace("META:", "") for meta_id in metabolite.annotation[db_identifier]])
+                if type(annotations[db_identifier]) is list:
+                    DB_ids[db_identifier]["ids"].update([meta_id.replace("META:", "") for meta_id in annotations[db_identifier]])
                 else:
-                    DB_ids[db_identifier]["ids"].add(metabolite.annotation[db_identifier].replace("META:", ""))
+                    DB_ids[db_identifier]["ids"].add(annotations[db_identifier].replace("META:", ""))
                 check_list.update([(db_identifier, meta_id.replace("META:", "")) for meta_id in DB_ids[db_identifier]["ids"]])
                 missing_links.remove(db_identifier)
         
@@ -216,7 +222,7 @@ class DataCollector:
             try:
                 if (not (found := self.interfaces[db_identifier].search_identifier(names, DB_ids)) is None) and (len(found) > 0):
                     DB_ids[db_identifier]["ids"].update(found)
-                    logging.info(f"Found new ids {found} in {db_identifier} via id & name based search for {metabolite.id}")
+                    logging.info(f"Found new ids {found} in {db_identifier} via id & name based search for {metabolite.id[2:]}")
                     check_list.update([(db_identifier, meta_id.replace("META:", "")) for meta_id in DB_ids[db_identifier]["ids"]])
             except KeyboardInterrupt:
                 raise

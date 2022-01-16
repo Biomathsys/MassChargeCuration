@@ -1,7 +1,8 @@
+from MCC.util import formula_to_dict
 from .fullBalancer import FullBalancer
 import logging
 import z3
-from ..util import is_cH_balanced 
+from ..util import is_cH_balanced, get_fbc_plugin 
 
 
 class AdherenceOptimizer(FullBalancer):
@@ -48,15 +49,16 @@ class AdherenceOptimizer(FullBalancer):
         Adds optimiziation (soft) constraints to the solver. Specifically adds for every metabolite the soft constraints to have the same
         assignment as in the self.target_model.
         """
-        for metabolite in self.model.metabolites:
-            original_metabolite = self.target_model.metabolites.get_by_id(metabolite.id)
+        for metabolite in self.model.getListOfSpecies():
+            original_plugin = get_fbc_plugin(self.target_model.getSpecies(metabolite.id))
+            original_elements = formula_to_dict(original_plugin.chemical_formula)
 
             # if we can adhere to the already given formula, we will try to
             constraints = []
             for element in self.relevant_elements:
-                constraints.append(self.metabolite_symbols[metabolite.id][element] == original_metabolite.elements.get(element, 0))
+                constraints.append(self.metabolite_symbols[metabolite.id[2:]][element] == original_elements.get(element, 0))
             self.solver.add_soft(z3.And(constraints.copy()))
-            constraints.append(self.charge_symbols[metabolite.id] == original_metabolite.charge)
+            constraints.append(self.charge_symbols[metabolite.id[2:]] == original_plugin.charge)
             self.solver.add_soft(z3.And(constraints), weight = 10)
-            self.solver.add_soft(self.charge_symbols[metabolite.id] == original_metabolite.charge)
+            self.solver.add_soft(self.charge_symbols[metabolite.id[2:]] == original_plugin.charge)
 

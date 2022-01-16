@@ -2,7 +2,7 @@ from .fullBalancer import FullBalancer
 import time
 import logging
 from z3 import sat
-from ..util import is_balanced
+from ..util import is_balanced, get_sbml_metabolites
 
 class SatCore(FullBalancer):
     """
@@ -82,8 +82,8 @@ class SatCore(FullBalancer):
                         fixed_scores[reaction_id] = 100 * len(unsat_core)
                         continue
                     # otherwise we determine the scores based on fixed metabolites
-                    for metabolite in self.model.reactions.get_by_id(reaction_id).metabolites:
-                        if metabolite.id in self.fixed_assignments:
+                    for metabolite_id in get_sbml_metabolites(self.model.getReaction(reaction_id)):
+                        if metabolite_id in self.fixed_assignments:
                             distances = self._get_reaction_distances(reaction_id, reactions_ids)
                             for answer_literal in unsat_core:
                                 score = fixed_scores.get(answer_literal, 0) + 1/distances.get(get_rid(answer_literal), len(unsat_core) + 1)
@@ -167,9 +167,9 @@ class SatCore(FullBalancer):
             => {reaction_id : float}
         """
         # first round collecting the assignment votes
-        assignment_votes = {metabolite.id : {} for metabolite in self.model.metabolites}
+        assignment_votes = {metabolite.id[2:] : {} for metabolite in self.model.getListOfSpecies()}
         balanced_combinations = {}
-        for reaction in self.model.reactions:
+        for reaction in self.model.getListOfReactions():
             balanced_combinations[reaction.id] = self._get_balanced_combinations(reaction, self.assignments, self.balance_function)
             for assignments in balanced_combinations[reaction.id]:
                 for metabolite_id, assignment in assignments.items():
@@ -183,7 +183,7 @@ class SatCore(FullBalancer):
 
         reaction_scores = {}
         # score reactions based on their metabolites, the combination with the best score determines the score of the reaction
-        for reaction in self.model.reactions:
+        for reaction in self.model.getListOfReactions():
             scores = []
             for combination in balanced_combinations[reaction.id]:
                 combination_score = 0
@@ -202,4 +202,4 @@ def get_rid(literal):
     """
     Returns the corresponding reaction for a given literal.
     """
-    return literal.decl().name()[2:]
+    return literal.decl().name()

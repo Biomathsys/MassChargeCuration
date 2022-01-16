@@ -3,7 +3,6 @@ import codecs
 import json
 import requests
 import xml.etree.ElementTree as ET
-import cobra
 import logging
 import pandas as pd
 from io import StringIO
@@ -123,30 +122,6 @@ class BioCycInterface(DatabaseInterface):
 
         with open(f"{self.data_path}/BioCyc.json" ,"w") as f:
             f.write(json.dumps(compound_dict))
-
-def dict_to_formula(formula_dict):
-    '''
-    Function to turn a formula represented as a dictionary to a formula represented by string.
-    
-    Args:
-        formula_dict: formula represented as a dictionary mapping elements to the number of their occurence.
-        
-    Returns:
-        Given formula as a string.
-        
-    '''
-    sorted_keys = sorted(formula_dict.keys())
-    result = []
-    for key in sorted_keys:
-        if len(key) == 2:
-            element_symbol = key[0] + key[1].lower()
-        else:
-            element_symbol = key
-        result.append(element_symbol)
-        if formula_dict[key] > 1:
-            result.append(str(formula_dict[key]))
-    return "".join(result)
-
 
 find_id = re.compile(r"UNIQUE-ID - (.*)")
 find_formula = re.compile(r"CHEMICAL-FORMULA - \((\S+) (\d+)\)")

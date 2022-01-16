@@ -1,8 +1,9 @@
+from MCC.util import get_fbc_plugin, get_sbml_metabolites
 from .satCore import SatCore
 from .formulaOptimizer import FormulaOptimizer
 from .adherenceOptimizer import AdherenceOptimizer
 from ..DataCollection.DataCollection import DataCollector
-from ..util import  adjust_proton_count, calculate_balance, formula_to_dict, get_pseudo_reactions, is_balanced, same_formula, is_cH_balanced, clean_formula
+from ..util import  adjust_proton_count, calculate_balance, formula_to_dict, get_pseudo_reactions, is_balanced, same_formula, is_cH_balanced, clean_formula, dict_to_formula, get_fbc_plugin, get_sbml_metabolites
 import logging
 import time
 import pandas as pd
@@ -19,7 +20,7 @@ class MassChargeCuration:
         total_time = time.process_time()
         self.model = model
         self.pseudo_reactions = get_pseudo_reactions(model)
-        self.original_model = model.copy()
+        self.original_model = model.clone()
         self.data_collector = DataCollector(model, data_path, **kw) if data_collector is None else data_collector
         self.fixed_assignments = fixed_assignments
         self.proton_adjusted_reactions = {}
@@ -29,6 +30,7 @@ class MassChargeCuration:
         self.balancer = SatCore(model, self.data_collector, fixed_assignments, fixed_reactions)
         logging.info(f"[{time.process_time() - t:.3f} s] Finished constructing model.")
         self.balancer.balance()
+        logging.info(f"[{time.process_time() - t:.3f} s] Finished balancibility check. {len(self.balancer.unbalancable_reactions.difference(get_pseudo_reactions(model)))} non-pseudo reactions were unbalancable.")
         for reaction in self.model.reactions:
             if not is_cH_balanced(reaction):
                 self.balancer.unbalancable_reactions.add(reaction.id)
@@ -63,82 +65,100 @@ class MassChargeCuration:
     def reintroduce_wildcards(self):
         # get any unkown metabolites
         wildcard_metabolites = set()
-        for metabolite in self.model.metabolites:
-            assignments = self.assignments[metabolite.id]
+        for metabolite in self.model.getListOfSpecies():
+            assignments = self.assignments[metabolite.id[2:]]
+            plugin = get_fbc_plugin(metabolite)
             if any(("R" in assignment[0]) for assignment in assignments):
-                matched_clean = any(same_formula(metabolite.formula, assignment[0]) for assignment in assignments)
+                matched_clean = any(same_formula(plugin.chemical_formula, assignment[0]) for assignment in assignments)
                 if not matched_clean:
-                    wildcard_metabolites.add(metabolite)
+                    wildcard_metabolites.add(metabolite.id[2:])
             if (len(assignments) == 0):
-                original_metabolite = self.original_model.metabolites.get_by_id(metabolite.id)
-                if (not same_formula(metabolite.formula, original_metabolite.formula)) or (not metabolite.charge == original_metabolite.charge):
-                        wildcard_metabolites.add(metabolite)
+                original_metabolite = self.original_model.getSpecies(metabolite.id)
+                original_plugin = get_fbc_plugin(original_metabolite)
+                if (not same_formula(plugin.chemical_formula, original_plugin.chemical_formula)) or (not plugin.charge == original_plugin.charge):
+                        wildcard_metabolites.add(metabolite.id[2:])
     
         # check for inferred formulae
         unchecked_metabolites = set(wildcard_metabolites)
         inferred = set()
         while len(unchecked_metabolites):
-            unchecked_metabolite = unchecked_metabolites.pop()
+            unchecked_metabolite_id = unchecked_metabolites.pop()
             reactions_counts = {}
-            for reaction in unchecked_metabolite.reactions:
-                reactions_counts[reaction] = len([m for m in reaction.metabolites if (m in wildcard_metabolites)])
+            for reaction_id in self.balancer.metabolite_reactions[unchecked_metabolite_id]:
+                reactions_counts[reaction_id] = len([m for m in get_sbml_metabolites(self.model.getReaction(reaction_id)) if (m in wildcard_metabolites)])
             if any(count == 1 for count in reactions_counts.values()):
-                wildcard_metabolites.remove(unchecked_metabolite)
-                inferred.add(unchecked_metabolite)
-                for reaction, count in reactions_counts.items():
+                wildcard_metabolites.remove(unchecked_metabolite_id)
+                inferred.add(unchecked_metabolite_id)
+                for reaction_id, count in reactions_counts.items():
                     if count > 1:
-                        unchecked_metabolites.update(wildcard_metabolites.intersection(reaction.metabolites))
-                        unchecked_metabolites.discard(unchecked_metabolite)
+                        unchecked_metabolites.update(wildcard_metabolites.intersection(get_sbml_metabolites(self.model.getReaction(reaction_id))))
+                        unchecked_metabolites.discard(unchecked_metabolite_id)
         # for inferred formulae we add ECO terms
+        # FIXME: reactivate
+        """
         for inferred_metabolite in inferred:
             inferred_metabolite.annotation["eco"] = "ECO:0000305"
             inferred_metabolite.notes["inferrence"] = "Inferred formulae"
-
+        """
         # add wildcard symbol
-        for metabolite in wildcard_metabolites:
-            assignments = self.assignments[metabolite.id]
+        for metabolite_id in wildcard_metabolites:
+            assignments = self.assignments[metabolite_id]
             matched_clean = False
+            plugin = get_fbc_plugin(self.model.getSpecies(f"M_{metabolite_id}"))
             for assignment in assignments:
-                if same_formula(metabolite.formula, assignment[0], ignore_rest = True):
-                    metabolite.formula = assignment[0]
+                if same_formula(plugin.chemical_formula, assignment[0], ignore_rest = True):
+                    if type((p := plugin.setChemicalFormula(assignment[0]))) == int and p < 0:
+                        logging.error(f"Setting chemical formula for {metabolite.id} to {assignment[0]} failed with code {p}")
+                        raise ValueError
                     matched_clean = True
             if not matched_clean:
-                element_dict = metabolite.elements.copy()
+                element_dict = formula_to_dict(assignment[0])
                 element_dict['R'] = 1
-                metabolite.elements = element_dict
+                if type((p := plugin.setChemicalFormula(dict_to_formula(element_dict)))) == int and p < 0:
+                    logging.error(f"Setting chemical formula for {metabolite.id} to {dict_to_formula(element_dict)} failed with code {p}")
+                    raise ValueError
                 
 
     def fit_to_original(self):
         assignments = self.balancer._calculate_cH_equivalents(reduce = False)
-        for metabolite in self.model.metabolites:
-            original_metabolite = self.original_model.metabolites.get_by_id(metabolite.id)
-            nonH_formula = remove_H.sub(r"\1", metabolite.formula)
-            if same_formula(remove_H.sub(r"\1", original_metabolite.formula), nonH_formula):
-                diff_seperated = assignments[metabolite.id].get(nonH_formula, {})
-                if not (metabolite.charge is None):
-                    diff = metabolite.elements.get("H", 0) - metabolite.charge
+        for metabolite in self.model.getListOfSpecies():
+            original_metabolite = self.original_model.getSpecies(metabolite.id)
+            plugin = get_fbc_plugin(metabolite)
+            original_plugin = get_fbc_plugin(original_metabolite)
+            metabolite_elements = formula_to_dict(plugin.chemical_formula)
+            nonH_formula = remove_H.sub(r"\1", plugin.chemical_formula)
+            if same_formula(remove_H.sub(r"\1", original_plugin.chemical_formula), nonH_formula):
+                diff_seperated = assignments[metabolite.id[2:]].get(nonH_formula, {})
+                if not (plugin.charge is None):
+                    diff = metabolite_elements.get("H", 0) - plugin.charge
                     equivalent_assignments = diff_seperated.get(diff, [])
                 else:
                     equivalent_assignments = diff_seperated.get(None, [])
                 for assignment in equivalent_assignments:
-                    if same_formula(assignment[0], original_metabolite.formula) and (assignment[1] == original_metabolite.charge):
-                        metabolite.formula = assignment[0]
-                        metabolite.charge = int(assignment[1])
+                    if same_formula(assignment[0], original_plugin.chemical_formula) and (assignment[1] == original_plugin.charge):
+                        if type((p := plugin.setChemicalFormula(assignment[0]))) == int and p < 0:
+                            logging.error(f"Setting chemical formula for {metabolite.id} to {assignment[0]} failed with code {p}")
+                            raise ValueError
+                        if type((p := plugin.setCharge(assignment[1]))) == int and p < 0:
+                            logging.error(f"Setting charge for {metabolite.id} to {assignment[1]} failed with code {p}")
+                            raise ValueError
 
             
     def clear_formulae(self):
-        for metabolite in self.model.metabolites:
-            element_dict = {element: value for element, value in metabolite.elements.items() if value != 0}
-            metabolite.elements = element_dict
-            metabolite.charge = int(metabolite.charge)
+        for metabolite in self.model.getListOfSpecies():
+            plugin = get_fbc_plugin(metabolite)
+            metabolite_elements = formula_to_dict(plugin.chemical_formula)
+            element_dict = {element: value for element, value in metabolite_elements.items() if value != 0}
+            if type((p := plugin.setChemicalFormula(dict_to_formula(element_dict)))) == int and p < 0:
+                logging.error(f"Setting chemical formula for {metabolite.id} to {dict_to_formula(element_dict)} failed with code {p}")
+                raise ValueError
+            plugin.setCharge(int(plugin.charge))
 
     def adjust_protons(self):
-        for reaction in self.model.reactions:
-            if len(reaction.products) == 0 or len(reaction.reactants) == 0:
+        for reaction in self.model.getListOfReactions():
+            if reaction.id in self.pseudo_reactions:
                 continue
-            if ('sbo' in reaction.annotation and reaction.annotation['sbo'] == 'SBO:0000629') or ("growth" in reaction.id.lower()):
-                continue
-            self.proton_adjusted_reactions[reaction] = adjust_proton_count(reaction)
+            self.proton_adjusted_reactions[reaction.id] = adjust_proton_count(reaction)
         
     @property
     def unbalancable_reactions(self):
@@ -215,7 +235,7 @@ class MassChargeCuration:
         if not filename is None:
             plt.savefig(f'{filename}.png', dpi=400,bbox_inches='tight')
         return fig
-
+#FIXME: adjust to libsbml
     def generate_reaction_report(self, filename=None, proton_threshold = 7):
 
         def get_shared_metabolites(reaction_ids):
@@ -250,11 +270,11 @@ class MassChargeCuration:
                                         "Mass Difference": difference_string(balance["mass"]),
                                         "Charge Difference" : balance["charge"]
                 })
-            elif self.proton_adjusted_reactions[reaction] > proton_threshold:
+            elif self.proton_adjusted_reactions[reaction.id] > proton_threshold:
                 reaction_report.append({"Id" : reaction.id,
                                         "Unbalanced Reaction" : str(reaction),
                                         "Unbalanced Type" : "High Proton Count",
-                                        "Reason" : f"Added {self.proton_adjusted_reactions[reaction]} protons.",
+                                        "Reason" : f"Added {self.proton_adjusted_reactions[reaction.id]} protons.",
                                         "Shared Metabolites" : "",
                                         "Mass Difference": "",
                                         "Charge Difference" : 0
@@ -276,26 +296,28 @@ class MassChargeCuration:
         other_model = self.original_model
 
         def other_metabolite(metabolite_id):
-            return other_model.metabolites.get_by_id(metabolite_id)
+            return other_model.getSpecies(metabolite_id)
 
         def generate_metabolite_information(metabolite):
+            plugin = get_fbc_plugin(metabolite)
             other = other_metabolite(metabolite.id)
+            other_plugin = get_fbc_plugin(other)
             this_databases = set()
             for assignment, dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
-                if same_formula(assignment[0], metabolite.formula) and ((metabolite.charge == assignment[1]) or (assignment[1] is None)):
+                if same_formula(assignment[0], plugin.chemical_formula) and ((plugin.charge == assignment[1]) or (assignment[1] is None)):
                     this_databases.update([f"{db[0]}:{db[1]}" for db in dbs])
             other_databases = set()
             for assignment, dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
-                if same_formula(assignment[0], other.formula) and ((other.charge == assignment[1]) or (assignment[1] is None)):
+                if same_formula(assignment[0], other_plugin.chemical_formula) and ((other_plugin.charge == assignment[1]) or (assignment[1] is None)):
                     other_databases.update([f"{db[0]}:{db[1]}" for db in dbs])
 
             inferrence_type = "Clean"
             if (len(this_databases) == 0):
                 inferrence_type = "Inferred"
-            if "R" in metabolite.formula:
+            if "R" in plugin.chemical_formula:
                 inferrence_type = "Unconstrained"
             
-            if same_formula(clean_formula(metabolite.formula), clean_formula(other.formula)) and (metabolite.charge == other.charge):
+            if same_formula(clean_formula(plugin.chemical_formula), clean_formula(other_plugin.chemical_formula)) and (plugin.charge == other_plugin.charge):
                 if len(this_databases) > 0:
                     target = "Target & "
                 else:
@@ -305,10 +327,10 @@ class MassChargeCuration:
 
             result ={"Id" : metabolite.id,
                     "Name" : metabolite.name,
-                    "Determined Formula" : metabolite.formula,
-                    "Determined Charge" : metabolite.charge,
-                    "Previous Formula" : other.formula,
-                    "Previous Charge" : other.charge,
+                    "Determined Formula" : plugin.chemical_formula,
+                    "Determined Charge" : plugin.charge,
+                    "Previous Formula" : other_plugin.chemical_formula,
+                    "Previous Charge" : other_plugin.charge,
                     "Inferrence Type" : inferrence_type,
                     "Reasoning" : target + ', '.join(this_databases),
                     "Used Databases" : ', '.join(this_databases),
@@ -316,51 +338,52 @@ class MassChargeCuration:
             }
  
             if not (target_model is None):
-                target = target_model.metabolites.get_by_id(metabolite.id)
+                target = target_model.getSpecies(metabolite.id)
+                target_plugin = get_fbc_plugin(target)
                 target_databases = set()
                 for assignment, dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
-                    if same_formula(assignment[0], target.formula) and ((target.charge == assignment[1]) or (assignment[1] is None)):
+                    if same_formula(assignment[0], target_plugin.chemical_formula) and ((target_plugin.charge == assignment[1]) or (assignment[1] is None)):
                         target_databases.update([f"{db[0]}:{db[1]}" for db in dbs])
                 result.update({
-                    "Target Formula" : target.formula,
-                    "Target Charge" : target.charge,
+                    "Target Formula" : target_plugin.chemical_formula,
+                    "Target Charge" : target_plugin.charge,
                     "Target Databases" : ', '.join(target_databases)
                 })
 
             return result
         information = {}
-        for metabolite in self.model.metabolites:
-            information[metabolite.id] = generate_metabolite_information(metabolite)
+        for metabolite in self.model.getListOfSpecies():
+            information[metabolite.id[2:]] = generate_metabolite_information(metabolite)
 
         
         fixing_reactions = set()
-        for reaction in self.model.reactions:
+        for reaction in self.model.getListOfReactions():
             if reaction.id in self.pseudo_reactions: continue
             unknown_count = 0
-            for metabolite in reaction.metabolites:
-                if information[metabolite.id]["Reasoning"] == "":
+            for metabolite_id in get_sbml_metabolites(reaction):
+                if information[metabolite_id]["Reasoning"] == "":
                     unknown_count += 1
             if unknown_count == 1:
-                fixing_reactions.add(reaction)
+                fixing_reactions.add(reaction.id)
         while len(fixing_reactions) > 0:
-            fixing_reaction = fixing_reactions.pop()
+            fixing_reaction_id = fixing_reactions.pop()
             reasons = []
-            fixed_metabolite = None
-            for metabolite in fixing_reaction.metabolites:
-                reason = information[metabolite.id]["Reasoning"]
-                if reason == "": fixed_metabolite = metabolite
+            fixed_metabolite_id = None
+            for metabolite_id in get_sbml_metabolites(self.model.getReaction(fixing_reaction_id)):
+                reason = information[metabolite_id]["Reasoning"]
+                if reason == "": fixed_metabolite_id = metabolite_id
                 else:
-                    reasons.append(f"{metabolite.id} -> {reason}")
-            if fixed_metabolite is not None: #otherwise we already fixed it
-                reason = f"{fixing_reaction.id}: {'(' if len(reasons) > 1 else ''}{'; '.join(reasons)}{')' if len(reasons) > 1 else ''}"
-                information[fixed_metabolite.id]["Reasoning"] = reason
-                for reaction in fixed_metabolite.reactions:
-                    if reaction.id in self.pseudo_reactions: continue
+                    reasons.append(f"{metabolite_id} -> {reason}")
+            if fixed_metabolite_id is not None: #otherwise we already fixed it
+                reason = f"{fixing_reaction_id}: {'(' if len(reasons) > 1 else ''}{'; '.join(reasons)}{')' if len(reasons) > 1 else ''}"
+                information[fixed_metabolite_id]["Reasoning"] = reason
+                for reaction_id in self.balancer.metabolite_reactions[fixed_metabolite_id]:
+                    if reaction_id in self.pseudo_reactions: continue
                     unknown_count = 0
-                    for metabolite in reaction.metabolites:
-                        if information[metabolite.id] == "": unknown_count += 1
+                    for metabolite_id in get_sbml_metabolites(self.model.getReaction(reaction_id)):
+                        if information[metabolite_id] == "": unknown_count += 1
                     if unknown_count == 1:
-                        fixing_reactions.add(reaction)
+                        fixing_reactions.add(reaction.id)
         
         for metabolite_id, info in information.items():
             if not info["Reasoning"].startswith("Target"):
