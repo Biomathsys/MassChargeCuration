@@ -11,7 +11,7 @@ class DatabaseInterface():
     def __init__(self):
         pass
 
-    def get_formulae_by_id(self, meta_id):
+    def get_assignment_by_id(self, meta_id):
         """
         Returns a list of all formulae/charge combinations which can be found for the given id in this database.
 

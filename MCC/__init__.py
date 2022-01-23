@@ -1,4 +1,5 @@
 from .DataCollection.DataCollection import *
 from .util import *
 from .Balancing.MCC import *
-from .DataCollection.Requests.databaseInterface import DatabaseInterface
+from .ModelInterface.ModelInterface import *
+from .core import * 

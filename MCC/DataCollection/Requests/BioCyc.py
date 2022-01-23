@@ -37,7 +37,7 @@ class BioCycInterface(DatabaseInterface):
             else:
                 self.BioCyc_dict = {}
             
-    def get_formulae_by_id(self, meta_id):
+    def get_assignments_by_id(self, meta_id):
         formula = self.BioCyc_dict.get(meta_id.replace("META:", ""), {}).get("formula", None)
         charge = self.BioCyc_dict.get(meta_id.replace("META:", ""), {}).get("charge", None)
         if formula is None:

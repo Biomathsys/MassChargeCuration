@@ -16,7 +16,7 @@ class AdherenceOptimizer(FullBalancer):
     
     def __init__(self, balancer, target_model):
         self.balancer = balancer
-        super().__init__(balancer.model, balancer.data_collector, balancer.fixed_assignments, target_model=target_model)
+        super().__init__(balancer.model_interface, balancer.data_collector, balancer.fixed_assignments, target_model=target_model)
         
 
     def generate_assertions(self):
@@ -28,8 +28,8 @@ class AdherenceOptimizer(FullBalancer):
         """
         self.relevant_elements = self.balancer.relevant_elements
         self.unbalancable_reactions = self.balancer.unbalancable_reactions.copy()
-        for reaction in self.model.reactions:
-            if not is_cH_balanced(reaction):
+        for reaction in self.model_interface.reactions:
+            if not reaction.is_balanced():
                 self.unbalancable_reactions.add(reaction.id)
         self._generate_metabolite_assertions()
         self._generate_reaction_assertions()
@@ -49,16 +49,14 @@ class AdherenceOptimizer(FullBalancer):
         Adds optimiziation (soft) constraints to the solver. Specifically adds for every metabolite the soft constraints to have the same
         assignment as in the self.target_model.
         """
-        for metabolite in self.model.getListOfSpecies():
-            original_plugin = get_fbc_plugin(self.target_model.getSpecies(metabolite.id))
-            original_elements = formula_to_dict(original_plugin.chemical_formula)
+        for metabolite in self.model.metabolites.values():
+            original_metabolite = self.target_model_interface.metabolites[metabolite.id]
 
             # if we can adhere to the already given formula, we will try to
             constraints = []
             for element in self.relevant_elements:
-                constraints.append(self.metabolite_symbols[metabolite.id[2:]][element] == original_elements.get(element, 0))
+                constraints.append(self.metabolite_symbols[metabolite.id][element] == original_metabolite.formula[element])
             self.solver.add_soft(z3.And(constraints.copy()))
-            constraints.append(self.charge_symbols[metabolite.id[2:]] == original_plugin.charge)
+            constraints.append(self.charge_symbols[metabolite.id] == original_metabolite.charge)
             self.solver.add_soft(z3.And(constraints), weight = 10)
-            self.solver.add_soft(self.charge_symbols[metabolite.id[2:]] == original_plugin.charge)
 
