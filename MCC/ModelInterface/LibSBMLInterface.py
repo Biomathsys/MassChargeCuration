@@ -1,13 +1,17 @@
-import libsbml
 import re
 import logging
+
+from .ReaderInterface import ReaderInterface
 
 identifiers_pattern = re.compile(r"https?://identifiers.org/(.+?)[:/](.+)")
 identifiers_url = "https://identifiers.org"
 
-class LibSBMLInterface():
+class LibSBMLInterface(ReaderInterface):
     def __init__(self, model):
-        self.model = model
+        super().__init__(model)
+
+    def get_model_id(self):
+        return self.model.id
 
     def write_metabolite(self, metabolite_id : str, name : str, formula : str, charge : int, sbo, cv_terms, notes):
         metabolite = self.model.getSpecies(metabolite_id)
@@ -15,7 +19,8 @@ class LibSBMLInterface():
         plugin = self._get_fbc_plugin(metabolite)
         plugin.setChemicalFormula(formula)
         plugin.setCharge(charge)
-        self._set_sbml_SBO(metabolite, sbo)
+        if not sbo is None:
+            self._set_sbml_SBO(metabolite, sbo)
         self._set_sbml_cv_terms(metabolite, cv_terms)
         self._set_sbml_notes(metabolite, notes)
 
@@ -24,32 +29,45 @@ class LibSBMLInterface():
         self._set_sbml_name(reaction, name)
 
         # setting metabolites
-        new_reactants = {metabolite_id : - count for metabolite_id, count in metabolites.items() if count < 0}
+        new_reactants = {metabolite_id : -count for metabolite_id, count in metabolites.items() if count < 0}
         new_products = {metabolite_id : count for metabolite_id, count in metabolites.items() if count > 0}
+        to_remove = set()
         for metabolite in reaction.getListOfReactants():
             if metabolite.species in new_reactants:
                 metabolite.setStoichiometry(new_reactants[metabolite.species])
                 new_reactants.pop(metabolite.species)
             else:
-                reaction.removeReactant(metabolite.species)
+                to_remove.add(metabolite.species)
+        for species in to_remove:
+            reaction.removeReactant(species)
                 
+        to_remove = set()
         for metabolite in reaction.getListOfProducts():
             if metabolite.species in new_products:
                 metabolite.setStoichiometry(new_products[metabolite.species])
                 new_products.pop(metabolite.species)
             else:
-                reaction.removeProduct(metabolite.species)
+                to_remove.add(metabolite.species)
+        for species in to_remove:
+            reaction.removeProduct(species)
+
         for metabolite_id, count in new_reactants.items():
             reaction.addReactant(self.model.getSpecies(metabolite_id), count)
         for metabolite_id, count in new_products.items():
             reaction.addProduct(self.model.getSpecies(metabolite_id), count)
         # setting other values
-        self._set_sbml_SBO(reaction, sbo)
+        if not sbo is None:
+            self._set_sbml_SBO(reaction, sbo)
         self._set_sbml_cv_terms(reaction, cv_terms)
         self._set_sbml_notes(reaction, notes)
 
     def write_model(self, filename):
-        libsbml.writeSBMLToFile(self.model.getSBMLDocument(), filename)
+        try:
+            import libsbml
+            libsbml.writeSBMLToFile(self.model.getSBMLDocument(), filename)
+        except ImportError:
+            logging.exception("Tried to use libsbml to write the model but failed to import it.")
+
 
 
     def get_metabolite_ids(self):
@@ -140,52 +158,61 @@ class LibSBMLInterface():
         return notes_dict
 
     def _set_sbml_cv_terms(self, sbml_object, cv_terms):
-        resources = set([f"{identifiers_url}/{db_id}/{identifier}"for db_id, identifiers in cv_terms.items() for identifier in identifiers])
-        cv_terms = sbml_object.getCVTerms()
-        if cv_terms is None:
-            cv_term = libsbml.CVTerm()
-            cv_term.setQualifierType(libsbml.BIOLOGICAL_QUALIFIER)
-            cv_term.setBiologicalQualifierType(libsbml.BQB_IS)
-            for resource in resources:
-                cv_term.addResource(resource)
-            sbml_object.addCVTerm(cv_term)
-            return
-        #FIXME: Do we need to treat nested CV Terms?
-        found = False
-        for cv_term in cv_terms:
-            # we only care for is relationships
-            if cv_term.getBiologicalQualifierType() == libsbml.BQB_IS:
-                if found == True:
-                    logging.error(f"Found multiple CV-Terms with qualifiertype 'is' this is not implemented.")
-                # identify those to remove and those to add
-                to_remove = set()
-                for resource_id in range(cv_term.getNumResources()):
-                    resource = cv_term.getResourceURI(resource_id)
-                    if not resource in resources:
-                        to_remove.add(resource) # keep track to remove the resource
-                    else: 
-                        resources.remove(resource) # the resource is already present
-                for missing_resource in resources:
-                    cv_term.addResource(missing_resource)
-                for resource in to_remove:
-                    cv_term.removeResource(resource)
+        try:
+            import libsbml
+            resources = set([f"{identifiers_url}/{db_id}/{identifier}"for db_id, identifiers in cv_terms.items() for identifier in identifiers])
+            cv_terms = sbml_object.getCVTerms()
+            if cv_terms is None:
+                cv_term = libsbml.CVTerm()
+                cv_term.setQualifierType(libsbml.BIOLOGICAL_QUALIFIER)
+                cv_term.setBiologicalQualifierType(libsbml.BQB_IS)
+                for resource in resources:
+                    cv_term.addResource(resource)
+                sbml_object.addCVTerm(cv_term)
+                return
+            #FIXME: Do we need to treat nested CV Terms?
+            found = False
+            for cv_term in cv_terms:
+                # we only care for is relationships
+                if cv_term.getBiologicalQualifierType() == libsbml.BQB_IS:
+                    if found == True:
+                        logging.error(f"Found multiple CV-Terms with qualifiertype 'is' this is not implemented.")
+                    # identify those to remove and those to add
+                    to_remove = set()
+                    for resource_id in range(cv_term.getNumResources()):
+                        resource = cv_term.getResourceURI(resource_id)
+                        if not resource in resources:
+                            to_remove.add(resource) # keep track to remove the resource
+                        else: 
+                            resources.remove(resource) # the resource is already present
+                    for missing_resource in resources:
+                        cv_term.addResource(missing_resource)
+                    for resource in to_remove:
+                        cv_term.removeResource(resource)
+        except ImportError:
+            logging.exception("Tried to use libsbml to write the model but failed to import it.")
 
     def _get_sbml_cv_terms(self, sbml_object):
-        terms = {}
-        cv_terms = sbml_object.getCVTerms()
-        if cv_terms is None:
-            return {}
-        #FIXME: Do we need to treat nested CV Terms?
-        for cv_term in cv_terms:
-            # we only care for is relationships
-            if cv_term.getBiologicalQualifierType() == libsbml.BQB_IS:
-                for resource_id in range(cv_term.getNumResources()):
-                    matches = identifiers_pattern.match(cv_term.getResourceURI(resource_id))
-                    db_id, identifier = matches.group(1), matches.group(2)
-                    cur_identifiers = terms.get(db_id, [])
-                    cur_identifiers.append(identifier)
-                    terms[db_id] = cur_identifiers
-        return terms
+        try:
+            import libsbml
+            terms = {}
+            cv_terms = sbml_object.getCVTerms()
+            if cv_terms is None:
+                return {}
+            #FIXME: Do we need to treat nested CV Terms?
+            for cv_term in cv_terms:
+                # we only care for is relationships
+                if cv_term.getBiologicalQualifierType() == libsbml.BQB_IS:
+                    for resource_id in range(cv_term.getNumResources()):
+                        matches = identifiers_pattern.match(cv_term.getResourceURI(resource_id))
+                        db_id, identifier = matches.group(1), matches.group(2)
+                        cur_identifiers = terms.get(db_id, [])
+                        cur_identifiers.append(identifier)
+                        terms[db_id] = cur_identifiers
+            return terms
+        except ImportError:
+            logging.exception("Tried to use libsbml to write the model but failed to import it.")
+
 
     def _get_sbml_annotations(self, sbml_object):
         identifiers = {}

@@ -1,8 +1,5 @@
-from MCC.util import formula_to_dict
 from .fullBalancer import FullBalancer
-import logging
 import z3
-from ..util import is_cH_balanced, get_fbc_plugin 
 
 
 class AdherenceOptimizer(FullBalancer):
@@ -11,7 +8,7 @@ class AdherenceOptimizer(FullBalancer):
 
     Args:
         balancer (MCC.FullBalancer): Balancer whose solution the optimization will be based upon. 
-        target_model (cobrapy.Model): Model to adhere to.
+        target_model (core.ModelInterface): ModelInterface of the model to adhere to.
     """
     
     def __init__(self, balancer, target_model):
@@ -28,9 +25,9 @@ class AdherenceOptimizer(FullBalancer):
         """
         self.relevant_elements = self.balancer.relevant_elements
         self.unbalancable_reactions = self.balancer.unbalancable_reactions.copy()
-        for reaction in self.model_interface.reactions:
+        for reaction in self.model_interface.reactions.values():
             if not reaction.is_balanced():
-                self.unbalancable_reactions.add(reaction.id)
+                self.unbalancable_reactions.add(reaction)
         self._generate_metabolite_assertions()
         self._generate_reaction_assertions()
         self._add_soft_constraints()
@@ -49,7 +46,7 @@ class AdherenceOptimizer(FullBalancer):
         Adds optimiziation (soft) constraints to the solver. Specifically adds for every metabolite the soft constraints to have the same
         assignment as in the self.target_model.
         """
-        for metabolite in self.model.metabolites.values():
+        for metabolite in self.model_interface.metabolites.values():
             original_metabolite = self.target_model_interface.metabolites[metabolite.id]
 
             # if we can adhere to the already given formula, we will try to

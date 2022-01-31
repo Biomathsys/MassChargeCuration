@@ -1,8 +1,3 @@
-import json
-import requests
-import logging
-import os
-
 class DatabaseInterface():
     """
     Class representing an Interface to a database. Could use online and offline resources.

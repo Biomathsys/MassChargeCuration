@@ -3,7 +3,6 @@ import sys
 import numpy as np
 import re
 import z3
-import re 
 element_re = re.compile("([A-Z][a-z]?)([0-9.]+[0-9.]?|(?=[A-Z])?)")
 
 
@@ -89,27 +88,15 @@ def adjust_proton_count(reaction, model_interface):
                     possible_h.add(metabolite)
             for metabolite in reaction.metabolites:
                 for hydrogen in possible_h:
-                    if hydrogen.id[-1] == metabolite.id:
+                    if hydrogen.id[-1] == metabolite.id[-1]:
                         h_id = hydrogen
         if h_id is None:
             return 0
-        reaction.metabolites[h_id] -= charge_balance
+        reaction.metabolites[h_id] =  reaction.metabolites.get(h_id, 0) - charge_balance
         # since note appending does not work / documentation is unclear, we use a workaround
-        old_str = reaction.notes_string[10:-17]
-        reaction.setNotes(old_str + f'''<p>Inferred: {charge_balance} protons added to {'reactants' if charge_balance > 0 else 'products'} to balance equation.</p>\n</html>''')
+        reaction.notes["Inferred"] =  f"{charge_balance} protons added to {'reactants' if charge_balance > 0 else 'products'} to balance equation."
         return charge_balance
     return 0
-
-def apply_assignment(assignment, model_interface):
-    """
-    Function to write a set of given assignments to the given model.
-
-    Args:
-        assignments ({metabolite : (formula, charge)}): Assignments to use.
-        model (cobrapy.Model): Model to which we want to apply the assignments to.  
-
-    """
-    pass
 
 def subset_formula(subset_f, superset_f):
     """
@@ -165,30 +152,3 @@ def get_integer_coefficients(reaction):
                 factor = 1/np.absolute(coeff)
                 break
     return factor
-
-def get_sbml_annotations():
-    return None
-
-def get_fbc_plugin():
-    return None
-
-def get_sbml_metabolites():
-    pass
-
-def formula_to_dict():
-    pass
-
-def same_formula():
-    pass
-
-def dict_to_formula():
-    pass
-
-def is_balanced():
-    pass
-
-def is_cH_balanced():
-    pass
-
-def clean_formula():
-    pass

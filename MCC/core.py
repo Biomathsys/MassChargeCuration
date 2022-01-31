@@ -12,6 +12,7 @@ replace_deuterium = re.compile(r"D([^ybs]|$)")
 replace_tritium = re.compile(r"T([^abceslhmi]|$)")
 replace_rest_R = re.compile(r"R\d*([^abefghnu]|$)")
 replace_rest_X = re.compile(r"X\d*([^e]|$)")
+replace_rest_Star = re.compile(r"\*\d*")
 replace_placeholders = re.compile(r"[*\.]\d*")
 remove_1 = re.compile(r"([A-Z][a-z]?)(1)([A-Z]|$)")
 remove_isotope_notation = re.compile(r"\[\d+([A-Z][a-z]?)\]")
@@ -21,13 +22,19 @@ remove_isotope_notation = re.compile(r"\[\d+([A-Z][a-z]?)\]")
 class Formula():
 
     def __init__(self, formula) -> None:
+        """
+        Class representing a Formula. Elements can be accessed via indexing, if an element is not present 0 will be returned.
+
+        Args:
+            formula (str or dict or Formula): Formula in form of a dictionary, string or another core.Formula.
+        """
         self.elements = {}
         if isinstance(formula, str):
             self.elements = Formula._to_dict(formula)
         elif isinstance(formula, dict):
             self.elements = formula
         elif isinstance(formula, Formula):
-            self.elements = Formula._to_dict(str(Formula))
+            self.elements = Formula._to_dict(str(formula))
         else:
             logging.error(f"Expected argument of type str or dict, not {type(formula)}.")
             raise ValueError
@@ -46,6 +53,9 @@ class Formula():
 
     def __hash__(self):
         return hash(repr(self))
+
+    def __lt__(self, other):
+        return str(self) < str(other)
 
     def copy(self):
         return Formula(self)
@@ -111,12 +121,14 @@ class Formula():
         formula = remove_isotope_notation.sub(r"\1", formula)
         # gather rest symbols
         if not ((found_R := replace_rest_R.search(formula)) is None):
-            formula = replace_rest_R.sub(r"\1", formula)
+            formula = replace_rest_R.sub("", formula)
         if not ((found_X := replace_rest_X.search(formula)) is None):
-            formula = replace_rest_X.sub(r"\1", formula)
+            formula = replace_rest_X.sub("", formula)
+        if not ((found_Star := replace_rest_Star.search(formula)) is None):
+            formula = replace_rest_Star.sub("", formula)
         if not ((found_other := replace_placeholders.search(formula)) is None):
             formula = replace_placeholders.sub("", formula)
-        if any([found_R, found_X, found_other]):
+        if any([found_R, found_X, found_Star, found_other]):
             formula += "R"
         return formula
 
@@ -135,6 +147,9 @@ class Formula():
 
 @dataclass
 class Metabolite():
+    """
+    Class representing a Metabolite. Two metabolites will be considered equal if their identfier is the same!
+    """
     id: str
     name: str
     formula: Formula
@@ -147,8 +162,14 @@ class Metabolite():
     def __hash__(self) -> int:
         return hash(self.id)
         
+    def __eq__(self, other):
+        return self.id == other.id
+
 @dataclass
 class Reaction():
+    """
+    Class representing a Reaction. Two reactions will be considered equal if their identfier is the same!
+    """
     id: str
     name: str
     metabolites: Dict = field(default_factory = lambda: {})
@@ -158,26 +179,30 @@ class Reaction():
 
     def __hash__(self) -> int:
         return hash(self.id)
+    
+    def __eq__(self, other):
+        return self.id == other.id
  
     def mass_balance(self, assignments = None):
         if assignments is None: assignments = {}
         mass_dict = {}
         for metabolite, coeff in self.metabolites.items():
-            if metabolite not in assignments:
+            if metabolite.id not in assignments:
                 formula = metabolite.formula
             else:
-                formula = assignments[metabolite][0]
+                formula = assignments[metabolite.id][0]
             for element, count in formula.elements.items():
                 mass_dict[element] = mass_dict.get(element, 0) + (count * coeff)
         return mass_dict
 
     def charge_balance(self, assignments = None):
+        if assignments is None: assignments = {}
         charge_balance = 0
         for metabolite, coeff in self.metabolites.items():
-            if metabolite not in assignments:
+            if metabolite.id not in assignments:
                 charge = metabolite.charge
             else:
-                charge = assignments[metabolite][1]
+                charge = assignments[metabolite.id][1]
             charge_balance += (charge * coeff)
         return charge_balance
 

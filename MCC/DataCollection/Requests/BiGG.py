@@ -1,7 +1,5 @@
 import json
 import requests
-import logging
-import libsbml
 import os
 from ...ModelInterface.ModelInterface import ModelInterface
 from .databaseInterface import DatabaseInterface

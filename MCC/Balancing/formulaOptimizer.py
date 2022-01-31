@@ -1,7 +1,6 @@
 from .fullBalancer import FullBalancer
 import logging
 import z3
-from ..util import formula_to_dict, is_cH_balanced, same_formula, clean_formula, get_fbc_plugin
 import re
 
 remove_H = re.compile(r"H\d*([^gfe]|$)") # remember to not also remove H from Hg
@@ -23,7 +22,7 @@ class FormulaOptimizer(FullBalancer):
 
     Args:
         balancer (MCC.FullBalancer): Balancer whose solution the optimization will be based upon. 
-        target_model (cobrapy.Model): Model to adhere to.
+        target_model (core.ModelInterface): ModelInterface of the model to adhere to.
     """
     
     def __init__(self, balancer, target_model_interface):
@@ -40,9 +39,9 @@ class FormulaOptimizer(FullBalancer):
         """
         self.relevant_elements = self.balancer.relevant_elements
         self.unbalancable_reactions = self.balancer.unbalancable_reactions.copy()
-        self.unknown_metabolites = self.balancer.unknown_metabolites.copy()
-        for reaction in self.balancer.model.reactions:
-            if not is_cH_balanced(reaction):
+        self.unknown_metabolite_ids = self.balancer.unknown_metabolite_ids.copy()
+        for reaction in self.balancer.model_interface.reactions.values():
+            if not reaction.is_balanced():
                 self.unbalancable_reactions.add(reaction)
         self._generate_metabolite_assertions()
         self._generate_reaction_assertions()
@@ -59,7 +58,7 @@ class FormulaOptimizer(FullBalancer):
 
     def _generate_metabolite_assertion(self, metabolite):
         """
-        Function the generate the assertion for a metabolite. Extended by adhering to a formula if it is the same formula as in self.target_model,
+        Function the generate the assertion for a metabolite. Extended by adhering to a formula if it is the same formula as in self.target_model_interface,
         as we do not want to optimize these further.
         """
         element_symbols = {}
@@ -108,7 +107,7 @@ class FormulaOptimizer(FullBalancer):
         """
         for metabolite in self.model_interface.metabolites.values():
             # if there is no constraint on a metabolite formula, we want it to become 0
-            if metabolite.id in self.unknown_metabolites:
+            if metabolite.id in self.unknown_metabolite_ids:
                 for element in self.relevant_elements:
                     self.solver.add_soft(self.metabolite_symbols[metabolite.id][element] == 0)
 
@@ -124,18 +123,4 @@ class FormulaOptimizer(FullBalancer):
                     if not (length_sorted_formulae[i][1] is None):
                         constraints.append(self.charge_symbols[metabolite.id] == length_sorted_formulae[i][1])
                     self.solver.add_soft(z3.And(constraints), weight = 10 * (i + 1))
-            """
-                # if the formula is unconstrained, we prefer to choose a partial representation from a database
-                if metabolite in self.unknown_metabolites:
-                    for i in range(len(length_sorted_formulae)):
-                        element_constraints = []
-                        for element in length_sorted_formulae[i][0]:
-                            if element == "R": continue
-                            element_constraints.append(self.metabolite_symbols[metabolite.id][element] == length_sorted_formulae[i][0].get(element, 0))
-                        if not (length_sorted_formulae[i][1] is None):
-                            element_constraints.append(self.charge_symbols[metabolite.id] == length_sorted_formulae[i][1])
-                        if metabolite.id in ["asntrna_c"]:
-                            print(element_constraints)
-                        # weight * 10 so we try to adhere to database formulae rather than having no elements
-                        self.solver.add_soft(z3.And(element_constraints), weight = 10 * (i + 1))
-            """
+            

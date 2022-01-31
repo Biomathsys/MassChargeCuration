@@ -54,6 +54,8 @@ class MetaNetXInterface(DatabaseInterface):
 
     def get_assignments_by_id(self, meta_id):
         result = self.prop_dict.get(meta_id, None)
+        if meta_id == "MNXM178":
+            logging.info(f"Found for {meta_id} : {result}")
         return [result]
 
     def search_identifier(self, names, other_ids):

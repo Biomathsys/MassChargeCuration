@@ -1,16 +1,16 @@
-from MCC.util import get_fbc_plugin, get_sbml_metabolites
+from ..core import Formula
 
 from ..ModelInterface.ModelInterface import ModelInterface
 from .satCore import SatCore
 from .formulaOptimizer import FormulaOptimizer
 from .adherenceOptimizer import AdherenceOptimizer
 from ..DataCollection.DataCollection import DataCollector
-from ..util import  adjust_proton_count, formula_to_dict, get_pseudo_reactions, is_balanced, same_formula, clean_formula, get_fbc_plugin, get_sbml_metabolites
+from ..util import  adjust_proton_count
 import logging
 import time
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
+from matplotlib import cm
 import numpy as np
 import re
 
@@ -32,11 +32,8 @@ class MassChargeCuration:
         self.balancer = SatCore(self.model_interface, self.data_collector, fixed_assignments, fixed_reactions)
         logging.info(f"[{time.process_time() - t:.3f} s] Finished constructing model.")
         self.balancer.balance()
-        logging.info(f"[{time.process_time() - t:.3f} s] Finished balancibility check. {len(self.balancer.unbalancable_reactions.difference(self.pseudo_reactions))} non-pseudo reactions were unbalancable.")
-        for reaction in self.model_interface.reactions:
-            if not reaction.is_balanced():
-                self.balancer.unbalancable_reactions.add(reaction.id)
-        logging.info(f"[{time.process_time() - t:.3f} s] Finished balancibility check. {len(self.balancer.unbalancable_reactions.difference(self.pseudo_reactions))} non-pseudo reactions were unbalancable.")
+        # as the model simplification already excludes all inherently unbalancable reactions, we must see which were unbalancable from the beginning
+        logging.info(f"[{time.process_time() - t:.3f} s] Finished balancibility check. {len([r.id for r in self.balancer.unbalancable_reactions.difference(self.pseudo_reactions)])} non-pseudo reactions were unbalancable.")
 
         if run_optimization:
             # optimize formula selections
@@ -45,7 +42,7 @@ class MassChargeCuration:
             self.optimizer.balance()
             logging.info(f"[{time.process_time() - t:.3f} s] Finished adherence optimization.")
 
-            # optimize formula selections
+           # optimize formula selections
             t = time.process_time()
             self.optimizer = FormulaOptimizer(self.balancer, self.original_model_interface)
             self.optimizer.balance()
@@ -57,24 +54,21 @@ class MassChargeCuration:
         # try to take representations from original model
         self.fit_to_original()
 
-        # remove any 0 entries from metabolite formulae
-        self.clear_formulae()
-
         # adjusting protons for reactions
         self.adjust_protons()
         self.total_time = time.process_time() - total_time
 
     def reintroduce_wildcards(self):
-        # get any unkown metabolites
+        # get any unknown metabolites
         wildcard_metabolites = set()
-        for metabolite in self.model_interface.metabolites():
+        for metabolite in self.model_interface.metabolites.values():
             assignments = self.assignments[metabolite.id]
             if any(("R" in formula) for formula, charge in assignments):
                 matched_clean = any(metabolite.formula == formula for formula, charge in assignments)
                 if not matched_clean:
                     wildcard_metabolites.add(metabolite)
             if (len(assignments) == 0):
-                original_metabolite = self.original_model_interface[metabolite.id]
+                original_metabolite = self.original_model_interface.metabolites[metabolite.id]
                 if (not metabolite.formula == original_metabolite.formula) or (not metabolite.charge == original_metabolite.charge):
                         wildcard_metabolites.add(metabolite)
     
@@ -85,13 +79,13 @@ class MassChargeCuration:
             unchecked_metabolite = unchecked_metabolites.pop()
             reactions_counts = {}
             for reaction in unchecked_metabolite.reactions:
-                reactions_counts[reaction] = len([m for m in reaction.metabolites.values() if (m in wildcard_metabolites)])
+                reactions_counts[reaction] = len([m for m in reaction.metabolites if (m in wildcard_metabolites)])
             if any(count == 1 for count in reactions_counts.values()):
                 wildcard_metabolites.remove(unchecked_metabolite)
                 inferred.add(unchecked_metabolite)
                 for reaction, count in reactions_counts.items():
                     if count > 1:
-                        unchecked_metabolites.update(wildcard_metabolites.intersection(reaction.metabolites.values()))
+                        unchecked_metabolites.update(wildcard_metabolites.intersection(reaction.metabolites))
                         unchecked_metabolites.discard(unchecked_metabolite)
         # for inferred formulae we add ECO terms
         # FIXME: reactivate
@@ -113,8 +107,7 @@ class MassChargeCuration:
                     metabolite.formula = formula
                     matched_clean = True
             if not matched_clean:
-                formula["R"] = 1
-                metabolite.formula = formula
+                metabolite.formula["R"] = 1
                 
 
     def fit_to_original(self):
@@ -138,10 +131,10 @@ class MassChargeCuration:
                         metabolite.charge = charge
 
     def adjust_protons(self):
-        for reaction in self.model.reactions.values():
+        for reaction in self.model_interface.reactions.values():
             if reaction in self.pseudo_reactions:
                 continue
-            self.proton_adjusted_reactions[reaction.id] = adjust_proton_count(reaction)
+            self.proton_adjusted_reactions[reaction.id] = adjust_proton_count(reaction, self.model_interface)
         
     @property
     def unbalancable_reactions(self):
@@ -169,14 +162,14 @@ class MassChargeCuration:
         size = 0.3
 
         cur_total = 0
-        for reaction in self.model.reactions:
-            if reaction.id in self.pseudo_reactions: continue
-            if not is_balanced(reaction):
+        for reaction in self.model_interface.reactions.values():
+            if reaction in self.pseudo_reactions: continue
+            if not reaction.is_balanced():
                 cur_total += 1
         old_total = 0
-        for reaction in self.original_model.reactions:
-            if reaction.id in self.pseudo_reactions: continue
-            if not is_balanced(reaction):
+        for reaction in self.original_model_interface.reactions.values():
+            if reaction in self.pseudo_reactions: continue
+            if not reaction.is_balanced():
                 old_total += 1
 
         metabolite_df = self.generate_metabolite_report()
@@ -188,7 +181,7 @@ class MassChargeCuration:
         inner_vals = grouped_report.groupby("Inferrence Type")["Count"].sum()
 
         # 4 colors or less:
-        cmap = sns.color_palette("tab20b", as_cmap=True)
+        cmap = cm.get_cmap("tab20b")
         inner_color_pos = np.array([i * 4 for i in range(len(inner_vals))]) + 4
         outer_color_pos = np.array([(i * 4) + np.arange(1, len(out_vals) + 1)  + 4 for i, out_vals in enumerate(outer_vals)], dtype=object)
 
@@ -214,17 +207,17 @@ class MassChargeCuration:
                 bbox_to_anchor=(1, 0, 1, 1))
 
         #set title
-        image_ax.set(aspect="equal", title=f'Metabolite Formulae for {self.model.id}\nin comparison with original formulae\n/w {cur_total} from {old_total} originally unbalanced\n reactions within {self.total_time:.1f} seconds.')
+        image_ax.set(aspect="equal", title=f'Metabolite Formulae for {self.model_interface.get_model_id()}\nin comparison with original formulae\n/w {cur_total} from {old_total} originally unbalanced\n reactions within {self.total_time:.1f} seconds.')
         if not filename is None:
             plt.savefig(f'{filename}.png', dpi=400,bbox_inches='tight')
         return fig
-#FIXME: adjust to libsbml
+
     def generate_reaction_report(self, filename=None, proton_threshold = 7):
 
         def get_shared_metabolites(reaction_ids):
             metabolites = []
             for reaction_id in reaction_ids:
-                metabolites.append(set(self.model.reactions.get_by_id(reaction_id).metabolites.keys()))
+                metabolites.append(set(self.model_interface.reactions[reaction_id].metabolites))
             if len(metabolites) == 0: return set()
             else: return set.intersection(*metabolites)
         
@@ -232,14 +225,14 @@ class MassChargeCuration:
             return ", ".join(f"{element}: {diff}" for element, diff in mass_dict.items() if diff != 0)
 
         reaction_report = []
-        pseudo_reactions = get_pseudo_reactions(self.model)
-        for reaction in self.model.reactions:
-            if reaction.id in pseudo_reactions: continue
-            balance = calculate_balance(reaction)
+        for reaction in self.model_interface.reactions.values():
+            if reaction in self.pseudo_reactions: continue
+            mass_balance = reaction.mass_balance()
+            charge_balance = reaction.charge_balance()
             unbalance_type = []
-            if not all(np.isclose(val, 0) for val in balance["mass"].values()):
+            if not all(np.isclose(val, 0) for val in mass_balance.values()):
                 unbalance_type.append("Mass") 
-            if not (np.isclose(balance["charge"],0)):
+            if not (np.isclose(charge_balance, 0)):
                 unbalance_type.append("Charge")
             if len(unbalance_type) != 0:
                 reason = self.reaction_reasons.get(reaction.id, [])
@@ -250,8 +243,8 @@ class MassChargeCuration:
                                         "Unbalanced Type" : ", ".join(unbalance_type),
                                         "Reason" : ", ".join(reason),
                                         "Shared Metabolites" : ", ".join([m.id for m in get_shared_metabolites(reason)]),
-                                        "Mass Difference": difference_string(balance["mass"]),
-                                        "Charge Difference" : balance["charge"]
+                                        "Mass Difference": difference_string(mass_balance),
+                                        "Charge Difference" : charge_balance
                 })
             elif self.proton_adjusted_reactions[reaction.id] > proton_threshold:
                 reaction_report.append({"Id" : reaction.id,
@@ -276,31 +269,29 @@ class MassChargeCuration:
         
 
     def generate_metabolite_report(self, filename = None, target_model = None):
-        other_model = self.original_model
+        other_model_interface = self.original_model_interface
 
-        def other_metabolite(metabolite_id):
-            return other_model.getSpecies(metabolite_id)
+        if not (target_model is None):
+            target_model_interface = ModelInterface(target_model)
 
         def generate_metabolite_information(metabolite):
-            plugin = get_fbc_plugin(metabolite)
-            other = other_metabolite(metabolite.id)
-            other_plugin = get_fbc_plugin(other)
+            other = other_model_interface.metabolites[metabolite.id]
             this_databases = set()
-            for assignment, dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
-                if same_formula(assignment[0], plugin.chemical_formula) and ((plugin.charge == assignment[1]) or (assignment[1] is None)):
+            for (formula, charge), dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
+                if (metabolite.formula == formula) and ((metabolite.charge == charge) or (charge is None)):
                     this_databases.update([f"{db[0]}:{db[1]}" for db in dbs])
             other_databases = set()
-            for assignment, dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
-                if same_formula(assignment[0], other_plugin.chemical_formula) and ((other_plugin.charge == assignment[1]) or (assignment[1] is None)):
+            for (formula, charge), dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
+                if (other.formula == formula) and ((other.charge == charge) or (charge is None)):
                     other_databases.update([f"{db[0]}:{db[1]}" for db in dbs])
 
             inferrence_type = "Clean"
             if (len(this_databases) == 0):
                 inferrence_type = "Inferred"
-            if "R" in plugin.chemical_formula:
+            if "R" in metabolite.formula:
                 inferrence_type = "Unconstrained"
             
-            if same_formula(clean_formula(plugin.chemical_formula), clean_formula(other_plugin.chemical_formula)) and (plugin.charge == other_plugin.charge):
+            if (metabolite.formula == other.formula) and (metabolite.charge == other.charge):
                 if len(this_databases) > 0:
                     target = "Target & "
                 else:
@@ -310,10 +301,10 @@ class MassChargeCuration:
 
             result ={"Id" : metabolite.id,
                     "Name" : metabolite.name,
-                    "Determined Formula" : plugin.chemical_formula,
-                    "Determined Charge" : plugin.charge,
-                    "Previous Formula" : other_plugin.chemical_formula,
-                    "Previous Charge" : other_plugin.charge,
+                    "Determined Formula" : str(metabolite.formula),
+                    "Determined Charge" : metabolite.charge,
+                    "Previous Formula" : str(other.formula),
+                    "Previous Charge" : other.charge,
                     "Inferrence Type" : inferrence_type,
                     "Reasoning" : target + ', '.join(this_databases),
                     "Used Databases" : ', '.join(this_databases),
@@ -321,56 +312,59 @@ class MassChargeCuration:
             }
  
             if not (target_model is None):
-                target = target_model.getSpecies(metabolite.id)
-                target_plugin = get_fbc_plugin(target)
+                target = target_model_interface.metabolites[metabolite.id]
                 target_databases = set()
-                for assignment, dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
-                    if same_formula(assignment[0], target_plugin.chemical_formula) and ((target_plugin.charge == assignment[1]) or (assignment[1] is None)):
+                for (formula, charge), dbs in self.data_collector.get_assignments(metabolite, database_seperated = True).items():
+                    if (formula == target.formula) and ((target.charge == charge) or (charge is None)):
                         target_databases.update([f"{db[0]}:{db[1]}" for db in dbs])
                 result.update({
-                    "Target Formula" : target_plugin.chemical_formula,
-                    "Target Charge" : target_plugin.charge,
+                    "Target Formula" : str(target.formula),
+                    "Target Charge" : target.charge,
                     "Target Databases" : ', '.join(target_databases)
                 })
 
             return result
         information = {}
-        for metabolite in self.model.getListOfSpecies():
+        for metabolite in self.model_interface.metabolites.values():
             information[metabolite.id] = generate_metabolite_information(metabolite)
 
         
         fixing_reactions = set()
-        for reaction in self.model.getListOfReactions():
-            if reaction.id in self.pseudo_reactions: continue
+        for reaction in self.model_interface.reactions.values():
+            if reaction in self.pseudo_reactions: continue
             unknown_count = 0
-            for metabolite_id in get_sbml_metabolites(reaction):
-                if information[metabolite_id]["Reasoning"] == "":
+            for metabolite in reaction.metabolites:
+                if information[metabolite.id]["Reasoning"] == "":
                     unknown_count += 1
             if unknown_count == 1:
-                fixing_reactions.add(reaction.id)
+                fixing_reactions.add(reaction)
         while len(fixing_reactions) > 0:
-            fixing_reaction_id = fixing_reactions.pop()
+            fixing_reaction = fixing_reactions.pop()
             reasons = []
-            fixed_metabolite_id = None
-            for metabolite_id in get_sbml_metabolites(self.model.getReaction(fixing_reaction_id)):
-                reason = information[metabolite_id]["Reasoning"]
-                if reason == "": fixed_metabolite_id = metabolite_id
+            fixed_metabolite = None
+            for metabolite in fixing_reaction.metabolites:
+                reason = information[metabolite.id]["Reasoning"]
+                if reason == "": fixed_metabolite = metabolite
                 else:
-                    reasons.append(f"{metabolite_id} -> {reason}")
-            if fixed_metabolite_id is not None: #otherwise we already fixed it
-                reason = f"{fixing_reaction_id}: {'(' if len(reasons) > 1 else ''}{'; '.join(reasons)}{')' if len(reasons) > 1 else ''}"
-                information[fixed_metabolite_id]["Reasoning"] = reason
-                for reaction_id in self.balancer.metabolite_reactions[fixed_metabolite_id]:
-                    if reaction_id in self.pseudo_reactions: continue
+                    reasons.append(f"{metabolite.id} -> {reason}")
+            if fixed_metabolite is not None: #otherwise we already fixed it
+                reason = f"{fixing_reaction.id}: {'(' if len(reasons) > 1 else ''}{'; '.join(reasons)}{')' if len(reasons) > 1 else ''}"
+                information[fixed_metabolite.id]["Reasoning"] = reason
+                for reaction in fixed_metabolite.reactions:
+                    if reaction in self.pseudo_reactions: continue
                     unknown_count = 0
-                    for metabolite_id in get_sbml_metabolites(self.model.getReaction(reaction_id)):
-                        if information[metabolite_id] == "": unknown_count += 1
+                    for metabolite in reaction.metabolites:
+                        if information[metabolite.id] == "": unknown_count += 1
                     if unknown_count == 1:
-                        fixing_reactions.add(reaction.id)
+                        fixing_reactions.add(reaction)
         
         for metabolite_id, info in information.items():
             if not info["Reasoning"].startswith("Target"):
-                if same_formula(info["Determined Formula"], info["Previous Formula"], ignore_rest = True) and (info["Determined Charge"] == info["Previous Charge"]):
+                determined_formula_no_R = Formula(info["Determined Formula"])
+                determined_formula_no_R["R"] = 0
+                previous_formula_no_R = Formula(info["Previous Formula"])
+                previous_formula_no_R["R"] = 0
+                if (determined_formula_no_R == previous_formula_no_R) and (info["Determined Charge"] == info["Previous Charge"]):
                     info["Reasoning"] = f"unconstrained Target{' & ' if info['Reasoning'] != '' else ''}{info['Reasoning']}"
 
 
@@ -378,12 +372,16 @@ class MassChargeCuration:
         def similarity(row, columns):
             base = columns[0]
             target = columns[1]
-            same_f = same_formula(row[base[0]], row[target[0]])
+            f1 = Formula(row[base[0]])
+            f2 = Formula(row[target[0]])
+            same_f = f1 == f2 
             same_charge = row[base[1]] == row[target[1]]
             
-            hydrogen_difference = formula_to_dict(row[base[0]]).get("H", 0) - formula_to_dict(row[target[0]]).get("H", 0)
+            hydrogen_difference = f1["H"] - f2["H"]
             charge_difference = row[base[1]] - row[target[1]]
-            same_f_nonH = same_formula(remove_H.sub(r"\1", row[base[0]]), remove_H.sub(r"\1", row[target[0]]))
+            f1["H"] = 0
+            f2["H"] = 0
+            same_f_nonH = f1 == f2
             hc_same = hydrogen_difference == charge_difference
             if same_f and same_charge: return "Same"
             if same_f_nonH and hc_same: return "Proton Diff"

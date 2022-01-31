@@ -5,7 +5,6 @@ from .fullBalancer import FullBalancer
 import time
 import logging
 from z3 import sat
-from ..util import is_balanced, get_sbml_metabolites
 
 class SatCore(FullBalancer):
     """
@@ -26,7 +25,6 @@ class SatCore(FullBalancer):
     def __init__(self, model_interface : ModelInterface, data_collector, fixed_assignments = None, fixed_reactions = None, *args, **kwargs):
         self.fixed_reactions = set() if fixed_reactions is None else fixed_reactions
         super().__init__(model_interface, data_collector, fixed_assignments, *args, **kwargs)
-        self.balance_function = is_balanced
         self.reaction_scores = self.score_reactions()
         self.unsat_cores = []
 
@@ -55,16 +53,14 @@ class SatCore(FullBalancer):
         unsat_cores = []
         used_literal_ids = set(self.answer_literals.keys()).difference([r.id for r in self.unbalancable_reactions])
         sat_core = set([self.answer_literals[id] for id in used_literal_ids])
-        print("sat_core" , sat_core)
         t = time.process_time()
         while len(unsat_core) > 0:
             unsat_cores.append(unsat_core)
             sat_core = sat_core.difference(unsat_core)
             self.solver.check(sat_core)
             unsat_core = self.solver.unsat_core()
-            print(f"finished with unsat core: {unsat_core}")
         self.unsat_cores = sorted(unsat_cores, key=len)
-        logging.debug(f"[{time.process_time() - t:.3f} s] unsat cores were: {unsat_cores}")
+        logging.info(f"[{time.process_time() - t:.3f} s] unsat cores were: {unsat_cores}")
         t = time.process_time()
 
         # trying to recover as many reactions as possible from unsat cores
@@ -75,7 +71,6 @@ class SatCore(FullBalancer):
                     logging.error(f"Could not balance fixed reaction {reaction_id}.")
                 self.unbalancable_reactions.add(self.model_interface.reactions[reaction_id])
                 self.reaction_reasons[reaction_id] = [get_rid(literal) for literal in unsat_core]
-                print(f"unsat with {get_rid(unsat_core[0])} {self.model_interface.reactions[reaction_id] in self.unbalancable_reactions}")
                 continue # reaction is unbalancable by itself
             else:
                 # first determine fixed scores
@@ -115,7 +110,6 @@ class SatCore(FullBalancer):
                                 logging.error(f"Could not balance fixed reaction {reaction_id}.")
                             sat_core.remove(answer_literal)
                             self.unbalancable_reactions.add(self.model_interface.reactions[reaction_id])
-                            print(f"unsat with {get_rid(answer_literal)} {self.model_interface.reactions[reaction_id] in self.unbalancable_reactions}")
                             self.reaction_reasons[reaction_id] = [get_rid(literal) for literal in unsat_core]
         return self.balance()
 
@@ -177,7 +171,7 @@ class SatCore(FullBalancer):
         assignment_votes = {metabolite_id : {} for metabolite_id in self.model_interface.metabolites}
         balanced_combinations = {}
         for reaction in self.model_interface.reactions.values():
-            balanced_combinations[reaction.id] = self._get_balanced_combinations(reaction, self.assignments, self.balance_function)
+            balanced_combinations[reaction.id] = self._get_balanced_combinations(reaction, self.assignments)
             for assignments in balanced_combinations[reaction.id]:
                 for metabolite_id, assignment in assignments.items():
                     assignment_votes[metabolite_id][assignment] = assignment_votes[metabolite_id].get(assignment, 0) + 1
@@ -204,13 +198,13 @@ class SatCore(FullBalancer):
                 reaction_scores[reaction.id] = max(scores)
         return reaction_scores
 
-    def _get_balanced_combinations(self, reaction, possible_assignments, is_balanced, accept_any = True):
+    def _get_balanced_combinations(self, reaction, possible_assignments, accept_any = True):
         """
         Function to find all balanced combinations for a given reaction based on this instances
         assignments attribute and the given "is balanced" function.
 
         Args:
-            reaction (cobrapy reaction): Reaction for which to try the combinations.
+            reaction (core.Reaction): Reaction for which to try the combinations.
             possible_assignments ({metabolite : [assignment]}): Dictionary mapping metabolites to lists of possible assignments to them.
             is_balanced (function(reaction, metabolite assignments) => bool): Function returning true if the reaction can be considered balanced wrt to the given assignment.
             accept any (bool) (Optional): Determines whether unknown information is considered balanced. Defaults to True.

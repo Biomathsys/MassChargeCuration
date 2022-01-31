@@ -1,6 +1,4 @@
 import re
-import codecs
-import json
 import requests
 import logging
 import pandas as pd
