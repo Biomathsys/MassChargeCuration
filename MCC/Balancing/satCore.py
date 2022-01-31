@@ -1,8 +1,10 @@
+from math import prod
+
+from ..ModelInterface.ModelInterface import ModelInterface
 from .fullBalancer import FullBalancer
 import time
 import logging
 from z3 import sat
-from ..util import is_balanced
 
 class SatCore(FullBalancer):
     """
@@ -20,10 +22,9 @@ class SatCore(FullBalancer):
             > The score for a metabolite assignment is based on the number of reactions which can be balanced using this assignment.
     """
     
-    def __init__(self, model, data_collector, fixed_assignments = None, fixed_reactions = None, *args, **kwargs):
+    def __init__(self, model_interface : ModelInterface, data_collector, fixed_assignments = None, fixed_reactions = None, *args, **kwargs):
         self.fixed_reactions = set() if fixed_reactions is None else fixed_reactions
-        super().__init__(model, data_collector, fixed_assignments, *args, **kwargs)
-        self.balance_function = is_balanced
+        super().__init__(model_interface, data_collector, fixed_assignments, *args, **kwargs)
         self.reaction_scores = self.score_reactions()
         self.unsat_cores = []
 
@@ -50,7 +51,7 @@ class SatCore(FullBalancer):
 
         # first we collect all unsat cores and determine the sat core
         unsat_cores = []
-        used_literal_ids = set(self.answer_literals.keys()).difference(self.unbalancable_reactions)
+        used_literal_ids = set(self.answer_literals.keys()).difference([r.id for r in self.unbalancable_reactions])
         sat_core = set([self.answer_literals[id] for id in used_literal_ids])
         t = time.process_time()
         while len(unsat_core) > 0:
@@ -59,7 +60,7 @@ class SatCore(FullBalancer):
             self.solver.check(sat_core)
             unsat_core = self.solver.unsat_core()
         self.unsat_cores = sorted(unsat_cores, key=len)
-        logging.debug(f"[{time.process_time() - t:.3f} s] unsat cores were: {unsat_cores}")
+        logging.info(f"[{time.process_time() - t:.3f} s] unsat cores were: {unsat_cores}")
         t = time.process_time()
 
         # trying to recover as many reactions as possible from unsat cores
@@ -68,7 +69,7 @@ class SatCore(FullBalancer):
                 reaction_id = get_rid(unsat_core[0])
                 if reaction_id in self.fixed_reactions:
                     logging.error(f"Could not balance fixed reaction {reaction_id}.")
-                self.unbalancable_reactions.add(reaction_id)
+                self.unbalancable_reactions.add(self.model_interface.reactions[reaction_id])
                 self.reaction_reasons[reaction_id] = [get_rid(literal) for literal in unsat_core]
                 continue # reaction is unbalancable by itself
             else:
@@ -82,7 +83,7 @@ class SatCore(FullBalancer):
                         fixed_scores[reaction_id] = 100 * len(unsat_core)
                         continue
                     # otherwise we determine the scores based on fixed metabolites
-                    for metabolite in self.model.reactions.get_by_id(reaction_id).metabolites:
+                    for metabolite in self.model_interface.reactions[reaction_id].metabolites:
                         if metabolite.id in self.fixed_assignments:
                             distances = self._get_reaction_distances(reaction_id, reactions_ids)
                             for answer_literal in unsat_core:
@@ -108,7 +109,7 @@ class SatCore(FullBalancer):
                             if reaction_id in self.fixed_reactions:
                                 logging.error(f"Could not balance fixed reaction {reaction_id}.")
                             sat_core.remove(answer_literal)
-                            self.unbalancable_reactions.add(reaction_id)
+                            self.unbalancable_reactions.add(self.model_interface.reactions[reaction_id])
                             self.reaction_reasons[reaction_id] = [get_rid(literal) for literal in unsat_core]
         return self.balance()
 
@@ -134,7 +135,7 @@ class SatCore(FullBalancer):
                 continue
             distances[reaction_id] = distance
             covered.add(reaction_id)
-            for metabolite in self.model.reactions.get_by_id(reaction_id).metabolites:
+            for metabolite in self.model_interface.reactions[reaction_id].metabolites:
                 for reaction in metabolite.reactions:
                     if (not reaction.id in covered) and (reaction.id in reactions_ids):
                         worklist.append((reaction.id, distance  + 1))
@@ -167,10 +168,10 @@ class SatCore(FullBalancer):
             => {reaction_id : float}
         """
         # first round collecting the assignment votes
-        assignment_votes = {metabolite.id : {} for metabolite in self.model.metabolites}
+        assignment_votes = {metabolite_id : {} for metabolite_id in self.model_interface.metabolites}
         balanced_combinations = {}
-        for reaction in self.model.reactions:
-            balanced_combinations[reaction.id] = self._get_balanced_combinations(reaction, self.assignments, self.balance_function)
+        for reaction in self.model_interface.reactions.values():
+            balanced_combinations[reaction.id] = self._get_balanced_combinations(reaction, self.assignments)
             for assignments in balanced_combinations[reaction.id]:
                 for metabolite_id, assignment in assignments.items():
                     assignment_votes[metabolite_id][assignment] = assignment_votes[metabolite_id].get(assignment, 0) + 1
@@ -183,7 +184,7 @@ class SatCore(FullBalancer):
 
         reaction_scores = {}
         # score reactions based on their metabolites, the combination with the best score determines the score of the reaction
-        for reaction in self.model.reactions:
+        for reaction in self.model_interface.reactions.values():
             scores = []
             for combination in balanced_combinations[reaction.id]:
                 combination_score = 0
@@ -197,9 +198,60 @@ class SatCore(FullBalancer):
                 reaction_scores[reaction.id] = max(scores)
         return reaction_scores
 
+    def _get_balanced_combinations(self, reaction, possible_assignments, accept_any = True):
+        """
+        Function to find all balanced combinations for a given reaction based on this instances
+        assignments attribute and the given "is balanced" function.
+
+        Args:
+            reaction (core.Reaction): Reaction for which to try the combinations.
+            possible_assignments ({metabolite : [assignment]}): Dictionary mapping metabolites to lists of possible assignments to them.
+            is_balanced (function(reaction, metabolite assignments) => bool): Function returning true if the reaction can be considered balanced wrt to the given assignment.
+            accept any (bool) (Optional): Determines whether unknown information is considered balanced. Defaults to True.
+
+        Returns:
+            List of balanced assignments to this reactions metabolites.
+        """
+        balanced_combinations = []
+        
+        def try_combinations(fixed, variable):
+            '''
+            Recursive function to try every possible combination of formulae. 
+            it makes use of balanced_combinations as a closure variable to communicate the results.
+            
+            '''
+            if not variable:
+                if "any" in fixed.values() and accept_any:
+                    balanced_combinations.append(fixed)
+                elif reaction.is_balanced(fixed):
+                    balanced_combinations.append(fixed)
+                    
+            else:
+                options = variable.pop()
+                for option in options["assignment"]:
+                    next_fixed = fixed.copy()
+                    next_fixed[options['id']] = option
+                    try_combinations(next_fixed, variable.copy())
+                    
+        options = []
+        for metabolite in reaction.metabolites:
+            if metabolite.id in possible_assignments:
+                if (len(possible_assignments[metabolite.id]) == 0) or any(("R" in assignment[0]) for assignment in self.assignments[metabolite.id]):
+                    options.append({"id" : metabolite.id, "assignment" : ["any"]})
+                else:
+                    options.append({"id" : metabolite.id, "assignment" : possible_assignments[metabolite.id]})
+            else:
+                options.append({"id" : metabolite.id, "assignment" : ["any"]})
+        if prod([len(s["assignment"]) for s in  options]) > 1e6:
+            logging.debug(f"For {reaction.id} there were too many combinations: {prod([len(s['assignment']) for s in options])}. Not checking for direct balancability.")
+            return []
+        try_combinations({}, options)
+
+        return balanced_combinations
+
 
 def get_rid(literal):
     """
     Returns the corresponding reaction for a given literal.
     """
-    return literal.decl().name()[2:]
+    return literal.decl().name()

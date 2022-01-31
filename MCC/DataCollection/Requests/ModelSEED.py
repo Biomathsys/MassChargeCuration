@@ -1,8 +1,5 @@
 import re
-import codecs
-import json
 import requests
-import cobra
 import logging
 import pandas as pd
 
@@ -37,7 +34,7 @@ class ModelSEEDInterface(DatabaseInterface):
             self.df = pd.read_csv(f"{self.data_path}/ModelSEED_compounds.tsv", sep = "\t", dtype=object)
 
             
-    def get_formulae_by_id(self, meta_id):
+    def get_assignments_by_id(self, meta_id):
         result = self.ModelSEED_dict.get(meta_id, None)
         if result is None:
             return result

@@ -52,8 +52,10 @@ class MetaNetXInterface(DatabaseInterface):
                 f.write(result.text)
             self.prop_df = pd.read_csv(f"{self.data_path}/chem_prop.tsv", sep = "\t", skiprows = 351)
 
-    def get_formulae_by_id(self, meta_id):
+    def get_assignments_by_id(self, meta_id):
         result = self.prop_dict.get(meta_id, None)
+        if meta_id == "MNXM178":
+            logging.info(f"Found for {meta_id} : {result}")
         return [result]
 
     def search_identifier(self, names, other_ids):
@@ -123,8 +125,6 @@ class MetaNetXInterface(DatabaseInterface):
             old_ids.update(old)
         return old_ids, new_ids
             
-        ids["metanetx.chemical"]["ids"] = new_ids
-        return old, new_ids
         
 
     def get_other_references(self, id, relevant_dbs):

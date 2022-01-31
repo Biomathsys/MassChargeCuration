@@ -1,8 +1,10 @@
 import numpy as np
 import os
-from ..util import *
 import logging
 import time
+
+from ..ModelInterface.ModelInterface import ModelInterface
+from ..core import Formula, Metabolite
 
 from .Requests.BiGG import BiGGInterface
 from .Requests.BioCyc import BioCycInterface
@@ -37,8 +39,8 @@ class DataCollector:
         biocyc_path (str): Optional; Path to biocyc database files.
     """
 
-    def __init__(self, model, data_path = "/data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None):
-        self.model = model
+    def __init__(self, model, data_path = "./data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None):
+        self.model_interface = ModelInterface(model)
         self.no_local = no_local
         self.interfaces = {}
         self.used_annotations = list(default_interfaces.keys()) if used_annotations is None else used_annotations
@@ -46,8 +48,6 @@ class DataCollector:
         self.strict_linkback = True
         try:
             os.makedirs(self.data_path)
-        except PermissionError:
-            raise PermissionError
         except OSError:
             pass
         self._load_default_interfaces(data_path, biocyc_path)
@@ -88,55 +88,56 @@ class DataCollector:
 
     
 
-    def get_formulae(self, metabolite):
+    def get_formulae(self, metabolite : Metabolite):
         """
         Function to gather all available formulae/charges with the given interfaces.
 
         Args:
-            metabolite (cobrapy.Metabolite): Metabolite for which to gather the formulae/charges.
+            metabolite (core.Metabolite): Metabolite for which to gather the formulae/charges.
 
         Returns:
             Dictionary mapping all found formulae/charges to the containing databases.
                 => {(formula, charge): set(database_identifiers)}
 
         """
-        formulae = {}
+        assignments = {}
+        annotations = metabolite.cv_terms
         for db_id, interface in self.interfaces.items():
-            if db_id in metabolite.annotation:
-                ids = [metabolite.annotation[db_id]] if type(metabolite.annotation[db_id]) != list else metabolite.annotation[db_id]
-                for identifier in ids:
-                    try:
-                        if not ((cur_formulae := interface.get_formulae_by_id(identifier)) is None):
-                            logging.debug(f"{db_id}, {identifier}")
-                            for formula in cur_formulae:
-                                if (type(formula[0]) == float) or (formula[0] is None): continue
-                                if (type(formula[1]) ==float) and np.isnan(formula[1]) or (formula[1] is None):
-                                    if self.allow_undefined_charge:
-                                        formula = (formula[0], None)
-                                    else:
-                                        continue
-                                formula = (clean_formula(formula[0]), int(formula[1]) if not formula[1] is None else None)
-                                cur_db = formulae.get(formula, set())
-                                cur_db.add((db_id, identifier))
-                                formulae[formula] = cur_db
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception as e:
-                        logging.exception(f"Error getting formula for {identifier} in {db_id}:")
+            ids = annotations.get(db_id, [])
+            for identifier in ids:
+                try:
+                    if not ((cur_assignments := interface.get_assignments_by_id(identifier)) is None):
+                        logging.debug(f"{db_id}, {identifier}")
+                        for assignment in cur_assignments:
+                            if assignment is None: continue
+                            if (type(assignment[0]) == float) or (assignment[0] is None): continue
+                            if (type(assignment[1]) ==float) and np.isnan(assignment[1]) or (assignment[1] is None):
+                                if self.allow_undefined_charge:
+                                    assignment = (Formula(assignment[0]), None)
+                                else:
+                                    continue
+                            assignment = (Formula(assignment[0]), int(assignment[1]) if not assignment[1] is None else None)
+                            cur_db = assignments.get(assignment, set())
+                            cur_db.add((db_id, identifier))
+                            assignments[assignment] = cur_db
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    logging.exception(f"Error getting formula for {identifier} in {db_id}:")
 
 
-        return formulae
+        return assignments
 
 
     def gather_info(self):
         """
         Gathers formulae and charges for all metabolites in self.model.
         """
-        for i, metabolite in enumerate(self.model.metabolites):
-            logging.info(f"{i + 1}/{len(self.model.metabolites)}: Getting information for {metabolite.id}")
+        for i, metabolite in enumerate(self.model_interface.metabolites.values()):
+            logging.info(f"{i + 1}/{len(self.model_interface.metabolites)}: Getting information for {metabolite.id}")
             self.assignments[metabolite.id] = self.get_formulae(metabolite)
 
-    def get_assignments(self, metabolite, clean = True, partial = True, database_seperated = False):
+    def get_assignments(self, metabolite : Metabolite, clean = True, partial = True, database_seperated = False):
         """
         Function to return all assignments for the given metabolite that were found using all registered interfaces.
         
@@ -173,19 +174,20 @@ class DataCollector:
         Updates/gathers all ids for all metabolites in the currently registered database interfaces.
         """
         now = time.process_time()
-        for i, metabolite in enumerate(self.model.metabolites):
-            logging.info(f"{i + 1}/{len(self.model.metabolites)}: {metabolite.id}")
+        for i, metabolite in enumerate(self.model_interface.metabolites.values()):
+            logging.info(f"{i + 1}/{len(self.model_interface.metabolites)}: {metabolite.id}")
             ids = self.get_ids(metabolite)
             logging.debug(f"Ids were {ids}")
+            annotations = metabolite.cv_terms
             for db in self.used_annotations: 
                 if db == "biocyc":
-                    metabolite.annotation[db] = [f"META:{entry}" for entry in ids[0][db]["ids"]]
+                    annotations[db] = [f"META:{entry}" for entry in ids[0][db]["ids"]]
                 else:
-                    metabolite.annotation[db] = list(ids[0][db]["ids"])
-            logging.debug(f"Updated metabolite {metabolite.id} annotations to {metabolite.annotation}")
+                    annotations[db] = list(ids[0][db]["ids"])
+            logging.debug(f"Updated metabolite {metabolite.id} annotations to {annotations}")
         logging.info(f"{time.process_time() - now}")
 
-    def get_ids(self, metabolite):
+    def get_ids(self, metabolite : Metabolite):
         """
         Updates/gathers all ids for the given metabolite in the currently registered database interfaces.
 
@@ -197,17 +199,18 @@ class DataCollector:
                 => {db_identifer : {"old_ids" : [outdated ids], "ids" : set(current ids)}}
         """
 
-        names = [metabolite.name] if metabolite.name else ([metabolite.id] if metabolite.id else [])
+        names = [metabolite.name] if metabolite.name else ([metabolite.id[2:], metabolite.id] if metabolite.id else [])
         DB_ids = {db_identifier : {"old_ids": [], "ids" : set()} for db_identifier in self.used_annotations}
         missing_links = set(self.used_annotations)
         check_list = set()
         # taking ids from annotations
-        for db_identifier in metabolite.annotation:
+        annotations = metabolite.cv_terms
+        for db_identifier in annotations:
             if db_identifier in self.used_annotations:
-                if type(metabolite.annotation[db_identifier]) is list:
-                    DB_ids[db_identifier]["ids"].update([meta_id.replace("META:", "") for meta_id in metabolite.annotation[db_identifier]])
+                if type(annotations[db_identifier]) is list:
+                    DB_ids[db_identifier]["ids"].update([meta_id.replace("META:", "") for meta_id in annotations[db_identifier]])
                 else:
-                    DB_ids[db_identifier]["ids"].add(metabolite.annotation[db_identifier].replace("META:", ""))
+                    DB_ids[db_identifier]["ids"].add(annotations[db_identifier].replace("META:", ""))
                 check_list.update([(db_identifier, meta_id.replace("META:", "")) for meta_id in DB_ids[db_identifier]["ids"]])
                 missing_links.remove(db_identifier)
         

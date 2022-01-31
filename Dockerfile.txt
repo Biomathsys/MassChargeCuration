@@ -1,0 +1,31 @@
+FROM ubuntu:latest
+
+RUN apt-get update && apt-get -y update
+
+RUN apt-get install -y build-essential python3.8 python3-pip python3-dev
+
+RUN apt install -y git
+
+RUN pip3 -q install pip
+
+RUN mkdir MCC
+
+WORKDIR MCC/
+
+COPY . .
+
+RUN pip3 install -r requirements.txt
+
+RUN pip3 install jupyter
+
+RUN git clone https://github.com/Z3Prover/z3
+RUN cd z3 && python3 scripts/mk_make.py
+
+RUN cd z3/build && make
+RUN cd z3/build && make install
+
+RUN pip3 install z3-solver
+
+RUN pip3 install -e .
+
+CMD ["jupyter", "notebook", "--port=8888", "--no-browser", "--ip=0.0.0.0", "--allow-root"]
