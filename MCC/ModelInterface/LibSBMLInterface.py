@@ -144,6 +144,7 @@ class LibSBMLInterface(ReaderInterface):
     def _get_sbml_notes(self, sbml_object):
         notes_dict = {}
         notes = sbml_object.getNotes()
+        if notes is None: return notes_dict
         for i in range(notes.getNumChildren()):
             html = notes.getChild(i)
             if html.getName() == "html":

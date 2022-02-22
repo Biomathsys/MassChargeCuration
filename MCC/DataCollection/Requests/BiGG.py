@@ -66,7 +66,7 @@ class BiGGInterface(DatabaseInterface):
         incomplete_models = {}
         for model_name in os.listdir(f"{self.data_path}/BiGG_models"):
             model_interface = ModelInterface(f"{self.data_path}/BiGG_models/{model_name}")
-            for metabolite in model_interface:
+            for metabolite in model_interface.metabolites.values():
                 meta_dict = BiGG_Database.get(metabolite.id[-2], {})
                 if (metabolite.formula is None) or (metabolite.charge is None):
                     model_dict = incomplete_models.get(model_name, {})
@@ -78,10 +78,10 @@ class BiGGInterface(DatabaseInterface):
                 names = meta_dict.get("names", set())
                 names.add(metabolite.name)
                 meta_dict["names"] = names
-                sbml_annotations = metabolite.cv_terms(metabolite)
-                for anno, value in sbml_annotations:
-                    annotation = annotations.get(anno, set())
-                    annotation.add(value)
+                sbml_annotations = metabolite.cv_terms
+                for anno, value in sbml_annotations.items():
+                    annotation = annotations.get(anno, [])
+                    annotation.append(value)
                     annotations[anno] = annotation
                 meta_dict["annotations"] = annotations
                 BiGG_Database[metabolite.id[-2]] = meta_dict

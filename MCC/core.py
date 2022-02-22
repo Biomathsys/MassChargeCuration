@@ -132,6 +132,21 @@ class Formula():
             formula += "R"
         return formula
 
+    def same(self, other, ignore = None):
+        if ignore is None:
+            return self == other
+        else:
+            dict1 = self.elements
+            dict2 = other.elements
+            same = True
+            for key in dict1:
+                if key in ignore: continue
+                if dict1[key] != dict2.get(key, 0): same = False
+            for key in dict2:
+                if key in ignore: continue
+                if dict2[key] != dict1.get(key, 0): same = False
+            return same 
+
     def __eq__(self, __x: object) -> bool:
         if not isinstance(__x, Formula):
             return False 
