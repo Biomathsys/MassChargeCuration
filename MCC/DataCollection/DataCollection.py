@@ -276,6 +276,5 @@ class DataCollector:
             except KeyboardInterrupt:
                 raise
             except Exception as e:
-                logging.exception(f"Error getting other identifiers:")
-                print(database_id, meta_id)
+                logging.exception(f"Error getting other identifiers: {next_id}")
         return DB_ids, names
