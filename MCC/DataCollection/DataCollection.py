@@ -39,8 +39,11 @@ class DataCollector:
         biocyc_path (str): Optional; Path to biocyc database files.
     """
 
-    def __init__(self, model, data_path = "./data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None):
-        self.model_interface = ModelInterface(model)
+    def __init__(self, model = None, data_path = "./data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None):
+        if model is None:
+            logging.warning(f"No model was passed to DataCollector. This is most likely not intended.")
+        else:
+            self.model_interface = ModelInterface(model)
         self.no_local = no_local
         self.interfaces = {}
         self.used_annotations = list(default_interfaces.keys()) if used_annotations is None else used_annotations
@@ -65,12 +68,13 @@ class DataCollector:
 
         Args:
             data_path: Path for the offline database files.
-            biocyc_path: Optinoal; Path for the BioCyc offline database file.
+            biocyc_path: Optional; Path for the BioCyc offline database file.
         """
         for identifier, constructor in default_interfaces.items():
             if not (self.used_annotations is None or (identifier in self.used_annotations)): continue
             if identifier == "biocyc":
-                interface = constructor(data_path, no_local = self.no_local, biocyc_base_path = biocyc_path)
+                if not (biocyc_path is None):
+                    interface = constructor(data_path, no_local = self.no_local, biocyc_base_path = biocyc_path)
             else:
                 interface = constructor(data_path, no_local = self.no_local)
             self.register_interface(identifier, interface)
@@ -248,7 +252,13 @@ class DataCollector:
                 if result is None: continue
                 for database_id, meta_ids in result.items():
                     if (meta_ids is None) or (database_id not in self.used_annotations): continue
+                    flattened_ids = []
                     for meta_id in meta_ids:
+                        if type(meta_id) == list:
+                            flattened_ids.extend(meta_id)
+                        else:
+                            flattened_ids.append(meta_id)
+                    for meta_id in flattened_ids:
                         meta_id = meta_id.replace("META:", "")
                         if (meta_id not in DB_ids[database_id]["ids"]):
                             if (meta_id in DB_ids[database_id]["old_ids"]):
@@ -267,4 +277,5 @@ class DataCollector:
                 raise
             except Exception as e:
                 logging.exception(f"Error getting other identifiers:")
+                print(database_id, meta_id)
         return DB_ids, names

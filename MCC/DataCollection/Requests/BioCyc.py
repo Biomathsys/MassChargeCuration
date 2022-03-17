@@ -7,6 +7,8 @@ import logging
 import pandas as pd
 from io import StringIO
 
+from ...core import Formula
+
 from .databaseInterface import DatabaseInterface
 
 replace_capital_ids = re.compile(r"([A-Z])([A-Z])")
@@ -150,7 +152,7 @@ def parse_biocyc_compound(compound_split):
         if not (found := find_link.search(line)) is None:
             db_links[found.groups()[0]] = found.groups()[1]
     return meta_id, {"names" : names,
-                    "formula" : dict_to_formula(elements),
+                    "formula" : str(Formula(elements)),
                     "charge" : charge,
                     "db_links" : db_links,
                     "type" : "compound"}

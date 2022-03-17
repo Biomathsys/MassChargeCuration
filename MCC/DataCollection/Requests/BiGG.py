@@ -38,6 +38,8 @@ class BiGGInterface(DatabaseInterface):
                 self.BiGG_dict = json.loads(f.read())
 
     def get_assignments_by_id(self, meta_id):
+        if not meta_id.startswith("M_"):
+            meta_id = f"M_{meta_id}"
         sub_dict = self.BiGG_dict.get(meta_id, {})
         formulae = set()
         for key, value in sub_dict.items():
@@ -64,10 +66,10 @@ class BiGGInterface(DatabaseInterface):
         """
         BiGG_Database = {}
         incomplete_models = {}
-        for model_name in os.listdir(f"{self.data_path}/BiGG_models"):
+        for model_name in os.listdir(f"{self.data_path}/BiGG_models")[:3]:
             model_interface = ModelInterface(f"{self.data_path}/BiGG_models/{model_name}")
             for metabolite in model_interface.metabolites.values():
-                meta_dict = BiGG_Database.get(metabolite.id[-2], {})
+                meta_dict = BiGG_Database.get(metabolite.id[:-2], {})
                 if (metabolite.formula is None) or (metabolite.charge is None):
                     model_dict = incomplete_models.get(model_name, {})
                     model_dict[metabolite.id] = (str(metabolite.formula), metabolite.charge)
@@ -84,13 +86,12 @@ class BiGGInterface(DatabaseInterface):
                     annotation.append(value)
                     annotations[anno] = annotation
                 meta_dict["annotations"] = annotations
-                BiGG_Database[metabolite.id[-2]] = meta_dict
+                BiGG_Database[metabolite.id[:-2]] = meta_dict
 
         for metabolite in BiGG_Database:
             for key, value in BiGG_Database[metabolite]["annotations"].items():
                 BiGG_Database[metabolite]["annotations"][key] = list(value)
             BiGG_Database[metabolite]["names"] = list(BiGG_Database[metabolite]["names"])
-
         with open(f"{self.data_path}/BiGG_Database.json", "w") as db_file:
             db_file.write(json.dumps(BiGG_Database)) 
 

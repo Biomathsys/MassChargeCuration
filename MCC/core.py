@@ -218,6 +218,7 @@ class Reaction():
                 charge = metabolite.charge
             else:
                 charge = assignments[metabolite.id][1]
+            if charge is None: return 0 #TODO: Better handling of unknown charges
             charge_balance += (charge * coeff)
         return charge_balance
 
