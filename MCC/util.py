@@ -92,6 +92,8 @@ def adjust_proton_count(reaction, model_interface):
                         h_id = hydrogen
         if h_id is None:
             return 0
+        if not h_id.id.lower().startswith("h"):
+            logging.warn(f"Found {h_id} as proton metabolite. If this is not intended, try to fix its formula using the fixed_assignments argument.")
         reaction.metabolites[h_id] =  reaction.metabolites.get(h_id, 0) - charge_balance
         # since note appending does not work / documentation is unclear, we use a workaround
         reaction.notes["Inferred"] =  f"{charge_balance} protons added to {'reactants' if charge_balance > 0 else 'products'} to balance equation."

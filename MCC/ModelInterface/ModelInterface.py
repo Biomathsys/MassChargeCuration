@@ -20,6 +20,7 @@ class ModelInterface():
         self.interface = self._read_model(model)
         self.metabolites = self._read_metabolites(self.interface)
         self.reactions = self._read_reactions(self.interface)
+        self._replace_string_placeholders()
 
     def _read_metabolites(self, interface):
         """
@@ -149,10 +150,23 @@ class ModelInterface():
                     logging.exception("Could not read model.")
         return interface
 
+
+    def _replace_string_placeholders(self):
+        new_metabolites = {}
+        for metabolite in self.metabolites.values():
+            metabolite.id = metabolite.id.replace("__45__", "-")
+            new_metabolites[metabolite.id] = metabolite
+        self.metabolites = new_metabolites
+        new_reactions = {}
+        for reaction in self.reactions.values():
+            reaction.id = reaction.id.replace("__45__", "-")
+            new_reactions[reaction.id] = reaction
+        self.reactions = new_reactions
     def copy(self):
         new_model_interface = ModelInterface()
         new_interface = self.interface.copy()
         new_model_interface.interface = new_interface
         new_model_interface.metabolites = new_model_interface._read_metabolites(new_interface)
         new_model_interface.reactions = new_model_interface._read_reactions(new_interface)
+        new_model_interface._replace_string_placeholders()
         return new_model_interface
