@@ -1,4 +1,5 @@
 import numpy as np
+import logging
 import pandas as pd
 
 def reaction_report(curator, filename = None, proton_threshold = 7):
@@ -35,11 +36,11 @@ def reaction_report(curator, filename = None, proton_threshold = 7):
                                     "Mass Difference": difference_string(mass_balance),
                                     "Charge Difference" : charge_balance
             })
-        elif curator.proton_adjusted_reactions[reaction.id] > proton_threshold:
+        elif curator.proton_adjusted_reactions.get(reaction.id, 0) > proton_threshold:
             reaction_report.append({"Id" : reaction.id,
                                     "Unbalanced Reaction" : str(reaction),
                                     "Unbalanced Type" : "High Proton Count",
-                                    "Reason" : f"Added {curator.proton_adjusted_reactions[reaction.id]} protons.",
+                                    "Reason" : f"Added {curator.proton_adjusted_reactions.get(reaction.id, 0)} protons.",
                                     "Shared Metabolites" : "",
                                     "Mass Difference": "",
                                     "Charge Difference" : 0
@@ -49,9 +50,10 @@ def reaction_report(curator, filename = None, proton_threshold = 7):
         order = {"Mass, Charge": 0, "Mass": 3, "Charge": 6, "High Proton Count" : 9}[series["Unbalanced Type"]]
         return order
     #sort frame by most interesting information
-    information_df["type_order"] = information_df.apply(type_order_func, axis = 1)
-    information_df["num_reasons"] = information_df["Reason"].apply(lambda x: len(x.split(", ")))
-    information_df = information_df.sort_values(["type_order", "num_reasons"]).reset_index(drop=True)
-    information_df = information_df.drop(columns = ["type_order", "num_reasons"])
+    if not information_df.empty:
+        information_df["type_order"] = information_df.apply(type_order_func, axis = 1)
+        information_df["num_reasons"] = information_df["Reason"].apply(lambda x: len(x.split(", ")))
+        information_df = information_df.sort_values(["type_order", "num_reasons"]).reset_index(drop=True)
+        information_df = information_df.drop(columns = ["type_order", "num_reasons"])
     if not filename is None: information_df.to_csv(f"{filename}.csv")
     return information_df
