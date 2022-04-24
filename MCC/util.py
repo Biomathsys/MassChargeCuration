@@ -1,5 +1,6 @@
 import logging
 import sys
+from turtle import pos
 import numpy as np
 import re
 import z3
@@ -93,7 +94,7 @@ def adjust_proton_count(reaction, model_interface):
                     h_id = hydrogen
     if h_id is None:
         if len(possible_h) > 0:
-            h_id = possible_h[0]
+            h_id = possible_h.pop()
             logging.warn(f"Could not find appropriate hydrogen to balance reaction {reaction.id}. Chose {h_id}.")
         else:
             logging.error(f"Could not find appropriate hydrogen to balance reaction {reaction.id}.")
