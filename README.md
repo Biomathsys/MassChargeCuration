@@ -20,7 +20,9 @@ Python module to automatically curate the mass and charge assignments for metabo
 ► Getting started with MassChargeCuration
 ----------------------------
 
-Requires Microsoft Research's Z3 to run. You can download it from https://github.com/Z3Prover/z3.
+To use this module, you need to have Python 3.8 or later to be installed.
+
+This also requires Microsoft Research's Z3 to run. You can download it from https://github.com/Z3Prover/z3.
 
 In order to use this module, you need to install it first, e.g. by running `pip install -e .` in the folder you downloaded this repository to.
 
