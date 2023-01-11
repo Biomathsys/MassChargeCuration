@@ -6,6 +6,7 @@ Python module to automatically curate the mass and charge assignments for metabo
 
 [![License (MIT Licence)](https://img.shields.io/badge/license-MIT-blue.svg?style=plastic)](https://opensource.org/licenses/MIT)
 ![Lines of Code](https://img.shields.io/tokei/lines/github/Finnem/MassChargeCuration?color=orange&style=plastic)
+![Code Size](https://img.shields.io/github/languages/code-size/Finnem/MassChargeCuration/total.svg?style=plastic)
 ![Download count](https://img.shields.io/github/downloads/Finnem/MassChargeCuration/total.svg?style=plastic)
 [![DOI](https://zenodo.org/badge/433977755.svg)](https://zenodo.org/badge/latestdoi/433977755)
 
