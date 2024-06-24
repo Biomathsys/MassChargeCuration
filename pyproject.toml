@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "MassChargeCuration"
+version = "0.9"
+# requires-python
+authors = [
+    {name = "Reihaneh Mostolizadeh"},
+    {name = "Finn Mier"}
+]
+
+description='Library to be used for mass and charge balancing a model'
+license='MIT'
+readme = 'README.md'
+
+# keywords = ['Systems Biology', 'GEM', 'Metabolic Modelling', 'Python Package']
+
+# classifiers = [ ]
+
+dependencies = [
+    "numpy",
+    "python-libsbml",
+    "matplotlib",
+    "pandas",
+    "requests"
+]
+
+[project.urls]
+repository = "https://github.com/Biomathsys/MassChargeCuration"
+
+[tool.setuptools.packages.find]
+where = ['MCC']
+
+
+
