@@ -33,4 +33,5 @@ repository = "https://github.com/Biomathsys/MassChargeCuration"
 #[tool.setuptools]
 #packages = ['MCC','MCC.Balancing']
 
-
+[tool.setuptools.packages.find]
+include = ["MCC*"]
