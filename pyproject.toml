@@ -12,7 +12,7 @@ authors = [
 ]
 
 description='Library to be used for mass and charge balancing a model'
-license='MIT'
+#license={text='MIT'}
 readme = 'README.md'
 
 # keywords = ['Systems Biology', 'GEM', 'Metabolic Modelling', 'Python Package']
