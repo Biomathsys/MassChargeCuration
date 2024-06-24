@@ -30,8 +30,7 @@ dependencies = [
 [project.urls]
 repository = "https://github.com/Biomathsys/MassChargeCuration"
 
-[tool.setuptools.packages.find]
-where = ['MCC']
-
+[tool.setuptools]
+packages = ['MCC']
 
 
