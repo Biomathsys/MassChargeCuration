@@ -1,6 +1,5 @@
 import logging
 import sys
-from turtle import pos
 import numpy as np
 import re
 import z3
