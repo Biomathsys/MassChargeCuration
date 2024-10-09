@@ -20,25 +20,44 @@ import re
 remove_H = re.compile(r"H\d*([^gfe]|$)") # remember to not also remove H from Hg
 
 class MassChargeCuration:
-    
-    def __init__(self, model, data_collector = None, data_path = "/data", fixed_assignments = None, fixed_reactions = None, run_optimization = True, **kw):
+    """
+    Class to balance a model system. This class will take a model balance the model system.
+
+    Args:
+        model (str or libsbml.Model or cobra.core.model.Model): Path to the model to read in or model that was read in using libsbml or cobrapy.
+        data_collector (DataCollector): DataCollector object to use for data collection. If None a new DataCollector will be created.
+        data_path (str): Path to the data folder.
+        fixed_assignments (dict): Dictionary of fixed assignments for metabolites.
+        fixed_reactions (dict): Dictionary of fixed reactions.
+        run_optimization (bool): If True the optimization will be run.
+        cache_ids (list): List of ids to cache.
+
+    """
+    def __init__(self, model, data_collector = None, data_path = "/data", fixed_assignments = None, fixed_reactions = None, run_optimization = True, cache_ids = None, **kw):
         total_time = time.process_time()
+        logging.info(f"Setting up model system.")
         self.model_interface = ModelInterface(model)
         self.pseudo_reactions = self.model_interface.get_pseudo_reactions()
         self.original_model_interface = self.model_interface.copy()
-        self.data_collector = DataCollector(model, data_path, **kw) if data_collector is None else data_collector
+        logging.info(f"Collecting Data...")
+        t = time.process_time()
+        self.data_collector = DataCollector(model, data_path, cache_ids = cache_ids, **kw) if data_collector is None else data_collector
+        logging.info(f"[{time.process_time() - t:.3f} s] Collected Data.")
         self.fixed_assignments = fixed_assignments
         self.proton_adjusted_reactions = {}
+        logging.info(f"[{time.process_time() - total_time:.3f} s] Finished setting up model system.")
 
         # finding unbalancable reactions
         t = time.process_time()
+        logging.info(f"Started constructing SMT model.")
         self.balancer = SatCore(self.model_interface, self.data_collector, fixed_assignments, fixed_reactions)
-        logging.info(f"[{time.process_time() - t:.3f} s] Finished constructing model.")
+        logging.info(f"[{time.process_time() - t:.3f} s] Finished constructing SMT model.")
         self.balancer.balance()
         # as the model simplification already excludes all inherently unbalancable reactions, we must see which were unbalancable from the beginning
         logging.info(f"[{time.process_time() - t:.3f} s] Finished balancibility check. {len([r.id for r in self.balancer.unbalancable_reactions.difference(self.pseudo_reactions)])} non-pseudo reactions were unbalancable.")
 
         if run_optimization:
+            logging.info(f"Started optimizing model.")
             # optimize formula selections
             t = time.process_time()
             self.optimizer = AdherenceOptimizer(self.balancer, self.original_model_interface)

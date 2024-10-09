@@ -8,5 +8,5 @@ setup(name='MassChargeCuration',
       #author_email='',
       license='MIT',
       packages=['MCC.DataCollection', 'MCC.DataCollection.Requests', 'MCC.Balancing', 'MCC.ModelInterface', 'MCC.ReportGeneration', 'MCC'],
-      install_requires=['numpy', 'pandas', 'requests', 'matplotlib', 'z3-solver', 'python-libsbml', 'tqdm'],
+      install_requires=['numpy', 'pandas', 'requests', 'matplotlib', 'z3-solver', 'python-libsbml', 'tqdm', 'dill'],
       zip_safe=False)
