@@ -8,4 +8,5 @@ setup(name='MassChargeCuration',
       #author_email='',
       license='MIT',
       packages=['MCC'],
+      install_requires=['numpy', 'pandas', 'requests', 'matplotlib', 'z3-solver'],
       zip_safe=False)
