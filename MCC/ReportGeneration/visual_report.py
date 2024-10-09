@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
 
-def visual_report(curator, filename=None, ax = None, size = None, **kwargs):
+def visual_report(curator, filename=None, ax = None, size = None, dpi = 400, **kwargs):
     if ax is None:
         fig, image_ax = plt.subplots()
         fig.set_size_inches(6,6)
@@ -62,5 +62,5 @@ def visual_report(curator, filename=None, ax = None, size = None, **kwargs):
     #set title
     image_ax.set(aspect="equal", title=f'Metabolite Formulae for {curator.model_interface.get_model_id()}\nin comparison with original formulae\n/w {cur_total} from {old_total} originally unbalanced\n reactions within {curator.total_time:.1f} seconds.')
     if not filename is None:
-        plt.savefig(f'{filename}.png', dpi=400, bbox_inches='tight')
+        plt.savefig(f'{filename}.png', dpi=dpi, bbox_inches='tight', **kwargs)
     return fig
