@@ -161,7 +161,7 @@ class LibSBMLInterface(ReaderInterface):
     def _set_sbml_cv_terms(self, sbml_object, cv_terms):
         try:
             import libsbml
-            resources = set([f"{identifiers_url}/{db_id}/{identifier}"for db_id, identifiers in cv_terms.items() for identifier in identifiers])
+            resources = set([f"{identifiers_url}/{db_id}:{identifier}"for db_id, identifiers in cv_terms.items() for identifier in identifiers])
             cv_terms = sbml_object.getCVTerms()
             if cv_terms is None:
                 cv_term = libsbml.CVTerm()
