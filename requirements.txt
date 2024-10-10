@@ -1,5 +1,0 @@
-numpy
-python-libsbml
-matplotlib
-pandas
-requests
