@@ -24,7 +24,9 @@ dependencies = [
     "python-libsbml",
     "matplotlib",
     "pandas",
-    "requests"
+    "requests",
+    "tqdm",
+    "z3-solver"
 ]
 
 [project.urls]
