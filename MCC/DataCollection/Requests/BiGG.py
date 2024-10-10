@@ -22,6 +22,9 @@ class BiGGInterface(DatabaseInterface):
                 self.BiGG_dict = json.loads(f.read())
         except FileNotFoundError:
             result = requests.get("http://bigg.ucsd.edu/api/v2/models") 
+            if result.status_code != 200:
+                result.raise_for_status()  # Will only raise for 4xx codes, so...
+                raise RuntimeError(f"Request to http://bigg.ucsd.edu/api/v2/models returned status code {result.status_code}")
             base_url = "http://bigg.ucsd.edu/static/models/{}.xml"
             base_path = f"{self.data_path}/BiGG_models"
             try:
@@ -103,6 +106,10 @@ class BiGGInterface(DatabaseInterface):
         """
         base_url = 'http://bigg.ucsd.edu/api/v2/universal/metabolites/{}'
         result = requests.get(base_url.format(meta_id))
+
+        if result.status_code != 200:
+            result.raise_for_status()  # Will only raise for 4xx codes, so...
+            raise RuntimeError(f"Request to {base_url.format(meta_id)} returned status code {result.status_code}")
         try:
             metabolite_json = result.json()
             charges = metabolite_json['charges']
