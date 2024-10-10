@@ -25,7 +25,7 @@ To use this module, you need to have Python 3.8 or later to be installed.
 
 This also requires Microsoft Research's Z3 to run. You can download it from https://github.com/Z3Prover/z3.
 
-In order to use this module, you need to install it first, e.g. by running `pip install -e .` in the folder you downloaded this repository to.
+In order to use this module, you need to install it first, e.g. by running `pip install .` in the folder you downloaded this repository to.
 
 To apply it to a model, simply load your model via cobrapy and instantiate a MassChargeCuration class with your model as parameter.
 If you are unsure about your models [identifiers.org](http://identifiers.org/) annotation, we also recommend to pass `update_ids = True` to the constructor. This will update any id used in the balancing effort, but will take longer (~15 minutes for 1200 Metabolites).
