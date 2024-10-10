@@ -26,7 +26,8 @@ dependencies = [
     "pandas",
     "requests",
     "tqdm",
-    "z3-solver"
+    "z3-solver",
+    "dill"
 ]
 
 [project.urls]
