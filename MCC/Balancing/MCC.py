@@ -33,7 +33,7 @@ class MassChargeCuration:
         cache_ids (list): List of ids to cache.
 
     """
-    def __init__(self, model, data_collector = None, data_path = "/data", fixed_assignments = None, fixed_reactions = None, run_optimization = True, cache_ids = None, **kw):
+    def __init__(self, model, data_collector = None, data_path = "./data", fixed_assignments = None, fixed_reactions = None, run_optimization = True, cache_ids = None, **kw):
         total_time = time.process_time()
         logging.info(f"Setting up model system.")
         self.model_interface = ModelInterface(model)
