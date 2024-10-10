@@ -1,1 +1,6 @@
 Example/data/
+**/__pycache__/
+**/.ipynb_checkpoints/
+**/*.bak
+**/*.egg-info/
+**/*.pyc
