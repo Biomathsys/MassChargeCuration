@@ -66,7 +66,7 @@ class ModelSEEDInterface(DatabaseInterface):
         self.df["name"] = self.df["name"].str.lower()
         found = self.df[(self.df["id"] == id.lower()) | (self.df["abbreviation"] == id.lower()) | (self.df["name"] == id.lower())]
         if len(found) == 0 or found.empty:
-            logging.warning(f"ModelSEED id: {id} could not be found in the database.")
+            logging.debug(f"ModelSEED id: {id} could not be found in the database.")
             return references
         out_refs = found["aliases"].values[0]
         if type(out_refs) != str: return references

@@ -2,6 +2,9 @@ import numpy as np
 import os
 import logging
 import time
+from tqdm import tqdm
+import dill
+import os
 
 from ..ModelInterface.ModelInterface import ModelInterface
 from ..core import Formula, Metabolite
@@ -37,9 +40,10 @@ class DataCollector:
             you can specify which databases to use here.
         no_local (bool): Optional; Whether or not to use local data/ download database files.
         biocyc_path (str): Optional; Path to biocyc database files.
+        cache_ids (str): Optional; Name of cache file for the metabolite ids in the data_path. If given, will load the ids from the cache file instead of updating them.
     """
 
-    def __init__(self, model = None, data_path = "./data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None):
+    def __init__(self, model = None, data_path = "./data", update_ids = False, gather_information = True, used_annotations = None, no_local = False, biocyc_path = None, cache_ids = None):
         if model is None:
             logging.warning(f"No model was passed to DataCollector. This is most likely not intended.")
         else:
@@ -57,7 +61,19 @@ class DataCollector:
         self.assignments = {}
         self.allow_undefined_charge = True
         if update_ids:
-            self.get_all_ids()
+            if cache_ids:
+                raise NotImplementedError("Caching of ids is currently not implemented.")
+                cache_path = os.path.join(self.data_path, cache_ids)
+                if os.path.exists(cache_path):
+                    with open(cache_path, "rb") as f:
+                        dill.load(f)
+
+                else:
+                    self.get_all_ids()
+                    with open(cache_path, "wb") as f:
+                        dill.dump(self.model_interface.metabolites, f)
+            else:
+                self.get_all_ids()
         if gather_information:
             self.gather_info()
 
@@ -137,8 +153,8 @@ class DataCollector:
         """
         Gathers formulae and charges for all metabolites in self.model.
         """
-        for i, metabolite in enumerate(self.model_interface.metabolites.values()):
-            logging.info(f"{i + 1}/{len(self.model_interface.metabolites)}: Getting information for {metabolite.id}")
+        for i, metabolite in tqdm(enumerate(self.model_interface.metabolites.values()), total = len(self.model_interface.metabolites), desc = "Gathering information for metabolites"):
+            logging.debug(f"{i + 1}/{len(self.model_interface.metabolites)}: Getting information for {metabolite.id}")
             self.assignments[metabolite.id] = self.get_formulae(metabolite)
 
     def get_assignments(self, metabolite : Metabolite, clean = True, partial = True, database_seperated = False):
@@ -178,9 +194,10 @@ class DataCollector:
         Updates/gathers all ids for all metabolites in the currently registered database interfaces.
         """
         now = time.process_time()
-        for i, metabolite in enumerate(self.model_interface.metabolites.values()):
-            logging.info(f"{i + 1}/{len(self.model_interface.metabolites)}: {metabolite.id}")
+        total_new_ids = 0
+        for i, metabolite in tqdm(enumerate(self.model_interface.metabolites.values()), total = len(self.model_interface.metabolites), desc = "Gathering ids for metabolites"):
             ids = self.get_ids(metabolite)
+            total_new_ids += ids[2]
             logging.debug(f"Ids were {ids}")
             annotations = metabolite.cv_terms
             for db in self.used_annotations: 
@@ -189,7 +206,8 @@ class DataCollector:
                 else:
                     annotations[db] = list(ids[0][db]["ids"])
             logging.debug(f"Updated metabolite {metabolite.id} annotations to {annotations}")
-        logging.info(f"{time.process_time() - now}")
+        logging.info(f"[{time.process_time() - now:.3f} s] Gathered Ids. {total_new_ids} new ids found.")
+
 
     def get_ids(self, metabolite : Metabolite):
         """
@@ -219,11 +237,13 @@ class DataCollector:
                 missing_links.remove(db_identifier)
         
         # fetching missing ids from other information
+        new_ids_found = 0
         for db_identifier in missing_links:
             try:
                 if (not (found := self.interfaces[db_identifier].search_identifier(names, DB_ids)) is None) and (len(found) > 0):
                     DB_ids[db_identifier]["ids"].update(found)
-                    logging.info(f"Found new ids {found} in {db_identifier} via id & name based search for {metabolite.id}")
+                    new_ids_found += len(found)
+                    logging.debug(f"Found new ids {found} in {db_identifier} via id & name based search for {metabolite.id}")
                     check_list.update([(db_identifier, meta_id.replace("META:", "")) for meta_id in DB_ids[db_identifier]["ids"]])
             except KeyboardInterrupt:
                 raise
@@ -277,4 +297,4 @@ class DataCollector:
                 raise
             except Exception as e:
                 logging.exception(f"Error getting other identifiers: {next_id}")
-        return DB_ids, names
+        return DB_ids, names, new_ids_found

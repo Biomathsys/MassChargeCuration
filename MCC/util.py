@@ -1,9 +1,9 @@
 import logging
 import sys
-from turtle import pos
 import numpy as np
 import re
 import z3
+import tqdm
 element_re = re.compile("([A-Z][a-z]?)([0-9.]+[0-9.]?|(?=[A-Z])?)")
 
 
@@ -74,10 +74,10 @@ def adjust_proton_count(reaction, model_interface):
         h_balance += metabolite.formula["H"] * coeff
     charge_balance = np.round(charge_balance)
     h_balance = np.round(h_balance)
-    if not charge_balance == h_balance:
-            logging.warn(f"Adding {h_balance} protons to charge unbalanced reaction {reaction.id} to maintain stoichiometrtic consistency.")
+    if not (charge_balance == h_balance) and (h_balance != 0):
+            logging.warning(f"Adding {h_balance} protons to charge unbalanced reaction {reaction.id} to maintain stoichiometrtic consistency.")
     elif charge_balance > 10:
-        logging.info(f"added {charge_balance} protons to reaction {reaction.id}")
+        logging.info(f"Added {charge_balance} protons to reaction {reaction.id}")
     h_id = None
     for metabolite in reaction.metabolites:
         if str(metabolite.formula) == "H":
@@ -95,12 +95,12 @@ def adjust_proton_count(reaction, model_interface):
     if h_id is None:
         if len(possible_h) > 0:
             h_id = possible_h.pop()
-            logging.warn(f"Could not find appropriate hydrogen to balance reaction {reaction.id}. Chose {h_id}.")
+            logging.warning(f"Could not find appropriate hydrogen to balance reaction {reaction.id}. Chose {h_id}.")
         else:
             logging.error(f"Could not find appropriate hydrogen to balance reaction {reaction.id}.")
             return 0
-    if not h_id.id.lower().startswith("h"):
-        logging.warn(f"Found {h_id} as proton metabolite. If this is not intended, try to fix its formula using the fixed_assignments argument.")
+    if not (h_id.id.lower().startswith("h") or h_id.id.lower().startswith("m_h")):
+        logging.warning(f"Found {h_id} as proton metabolite. If this is not intended, try to fix its formula using the fixed_assignments argument.")
     reaction.metabolites[h_id] =  reaction.metabolites.get(h_id, 0) - h_balance
     # since note appending does not work / documentation is unclear, we use a workaround
     reaction.notes["Inferred"] =  f"{h_balance} protons added to {'reactants' if h_balance > 0 else 'products'} to balance equation."
@@ -160,3 +160,28 @@ def get_integer_coefficients(reaction):
                 factor = 1/np.absolute(coeff)
                 break
     return factor
+
+# taken from https://stackoverflow.com/questions/37573483/progress-bar-while-download-file-over-http-with-requests
+def progress_download(url, filename):
+    import functools
+    import pathlib
+    import shutil
+    import requests
+    from tqdm.auto import tqdm
+    
+    r = requests.get(url, stream=True, allow_redirects=True)
+    if r.status_code != 200:
+        r.raise_for_status()  # Will only raise for 4xx codes, so...
+        raise RuntimeError(f"Request to {url} returned status code {r.status_code}")
+    file_size = int(r.headers.get('Content-Length', 0))
+
+    path = pathlib.Path(filename).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    desc = "(Unknown total file size)" if file_size == 0 else ""
+    r.raw.read = functools.partial(r.raw.read, decode_content=True)  # Decompress if needed
+    with tqdm.wrapattr(r.raw, "read", total=file_size, desc=desc) as r_raw:
+        with path.open("wb") as f:
+            shutil.copyfileobj(r_raw, f)
+
+    return path

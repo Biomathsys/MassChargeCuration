@@ -2,6 +2,7 @@ import requests
 import logging
 import pandas as pd
 from difflib import SequenceMatcher
+from ...util import progress_download
 
 from .databaseInterface import DatabaseInterface
 
@@ -28,28 +29,22 @@ class MetaNetXInterface(DatabaseInterface):
         try:
             self.xref_df = pd.read_csv(f"{self.data_path}/chem_xref.tsv", sep = "\t", skiprows = 351)
         except FileNotFoundError:
-            result = requests.get(base_url.format("chem_xref.tsv"))
-            result.raise_for_status()
-            with open(f"{self.data_path}/chem_xref.tsv", "w") as f:
-                f.write(result.text)
+            logging.warning("MetaNetX xref database not found. Downloading MetaNetX xref database, this might take a while...")
+            progress_download(base_url.format("chem_xref.tsv"), f"{self.data_path}/chem_xref.tsv")
             self.xref_df = pd.read_csv(f"{self.data_path}/chem_xref.tsv", sep = "\t", skiprows = 351)
 
         try:
             self.depr_df = pd.read_csv(f"{self.data_path}/chem_depr.tsv", sep = "\t", skiprows = 351)
         except FileNotFoundError:
-            result = requests.get(base_url.format("chem_depr.tsv"))
-            result.raise_for_status()
-            with open(f"{self.data_path}/chem_depr.tsv", "w") as f:
-                f.write(result.text)
+            logging.warning("MetaNetX depr database not found. Downloading MetaNetX depr database, this might take a while...")
+            progress_download(base_url.format("chem_depr.tsv"), f"{self.data_path}/chem_depr.tsv")
             self.depr_df = pd.read_csv(f"{self.data_path}/chem_depr.tsv", sep = "\t", skiprows = 351)
 
         try:
             self.prop_df = pd.read_csv(f"{self.data_path}/chem_prop.tsv", sep = "\t", skiprows = 351)
         except FileNotFoundError:
-            result = requests.get(base_url.format("chem_prop.tsv"))
-            result.raise_for_status()
-            with open(f"{self.data_path}/chem_prop.tsv", "w") as f:
-                f.write(result.text)
+            logging.warning("MetaNetX prop database not found. Downloading MetaNetX prop database, this might take a while...")
+            progress_download(base_url.format("chem_prop.tsv"), f"{self.data_path}/chem_prop.tsv")
             self.prop_df = pd.read_csv(f"{self.data_path}/chem_prop.tsv", sep = "\t", skiprows = 351)
 
     def get_assignments_by_id(self, meta_id):
