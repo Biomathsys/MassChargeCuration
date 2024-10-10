@@ -105,6 +105,9 @@ class BiGGInterface(DatabaseInterface):
         Online fallback function if a meta_id cannot be found in the offline databases.
         """
         base_url = 'http://bigg.ucsd.edu/api/v2/universal/metabolites/{}'
+        # since generally "M_" is not included in the meta_id in BiGG
+        if meta_id.startswith("M_"):
+            meta_id = meta_id[2:]
         result = requests.get(base_url.format(meta_id))
 
         if result.status_code != 200:
